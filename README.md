@@ -44,21 +44,6 @@ LICENSE
 THIRD_PARTY_LICENSES.md
 ATTRIBUTIONS.md
 
-### Attributions
-
-- amildahl/amdddc-windows — Showed that some LG displays accept input switching
-  over an alternate I²C subaddress on AMD GPUs. This project is essentially a
-  tray-based wrapper with UI/hotkeys around that approach so HUGE thanks to them for their work.
-  https://github.com/amildahl/amdddc-windows
-
-- AMD ADL SDK — Used to access display I²C from AMD GPUs. ADL is licensed by AMD.
-
-- nlohmann/json — MIT-licensed single-header JSON parser for configuration.
-
-- DDC/CI references — ddcutil docs/wiki and other DDC/CI notes used to understand
-  VCP codes and timing behavior. No code copied.
-
-
 ---
 
 ## Usage Tips
@@ -69,7 +54,8 @@ ATTRIBUTIONS.md
 ---
 
 ## Credits & Licenses
-- **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  
+- **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  This project is essentially a
+  tray-based wrapper with UI/hotkeys around that approach so HUGE thanks to them for their work.
   https://github.com/amildahl/amdddc-windows
 - **nlohmann/json** — MIT  
   https://github.com/nlohmann/json
