@@ -57,3 +57,28 @@ ATTRIBUTIONS.md
 
 - DDC/CI references — ddcutil docs/wiki and other DDC/CI notes used to understand
   VCP codes and timing behavior. No code copied.
+
+
+---
+
+## Usage Tips
+- **I²C subaddress**: many LG models need `0x50` for input switching via this path; set it in Settings.
+- **Adapter/Display indices**: these can change (driver updates / device changes). Re-run Settings → Monitor if switching stops working.
+- **Debounce**: if you get double-switches or flaky behavior, increase debounce in Settings.
+
+---
+
+## Credits & Licenses
+- **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  
+  https://github.com/amildahl/amdddc-windows
+- **nlohmann/json** — MIT  
+  https://github.com/nlohmann/json
+- **AMD ADL SDK** — Provided under AMD’s SDK EULA (proprietary). AMD retains ownership of the SDK.
+- DDC/CI references — ddcutil docs/wiki and other notes (documentation only).
+
+See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) and [ATTRIBUTIONS.md](./ATTRIBUTIONS.md) for details.
+
+---
+
+## Disclaimer
+This project is not affiliated with AMD or LG. Use at your own risk.
