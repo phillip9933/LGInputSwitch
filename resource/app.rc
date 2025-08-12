@@ -1,0 +1,55 @@
+﻿#include "resource.h"
+#include <windows.h>
+
+// Dialog: simple layout; you can refine later
+IDD_SETTINGS DIALOGEX 0, 0, 300, 290
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "LG Input Switch - Settings"
+FONT 9, "Segoe UI", 0, 0, 0x1
+BEGIN
+LTEXT       "Monitor:", -1, 10, 10, 60, 10
+COMBOBOX    IDC_MONITOR, 70, 8, 220, 120, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+GROUPBOX    "Inputs", -1, 10, 34, 140, 96
+CONTROL     "DisplayPort", IDC_INPUT_DP, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 48, 100, 12
+CONTROL     "USB-C", IDC_INPUT_USBC, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 66, 100, 12
+CONTROL     "HDMI1", IDC_INPUT_HDMI1, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 84, 100, 12
+CONTROL     "HDMI2", IDC_INPUT_HDMI2, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 18, 102, 100, 12
+
+GROUPBOX    "Hotkeys", -1, 160, 34, 130, 96
+LTEXT       "Cycle:", -1, 168, 48, 30, 10
+EDITTEXT    IDC_HOTKEY_CYCLE, 205, 46, 80, 14, ES_AUTOHSCROLL
+LTEXT       "DP:", -1, 168, 66, 18, 10
+EDITTEXT    IDC_HK_DP, 205, 64, 80, 14, ES_AUTOHSCROLL
+LTEXT       "USB-C:", -1, 168, 84, 35, 10
+EDITTEXT    IDC_HK_USBC, 205, 82, 80, 14, ES_AUTOHSCROLL
+LTEXT       "HDMI1:", -1, 168, 102, 35, 10
+EDITTEXT    IDC_HK_HDMI1, 205, 100, 80, 14, ES_AUTOHSCROLL
+LTEXT       "HDMI2:", -1, 168, 120, 35, 10
+EDITTEXT    IDC_HK_HDMI2, 205, 118, 80, 14, ES_AUTOHSCROLL
+
+GROUPBOX    "Cycle Order", -1, 10, 136, 140, 98
+LISTBOX     IDC_ORDER_LIST, 18, 150, 100, 70, LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT
+PUSHBUTTON  "Up", IDC_ORDER_UP, 122, 150, 22, 18
+PUSHBUTTON  "Down", IDC_ORDER_DOWN, 122, 174, 22, 18
+
+LTEXT       "I2C Addr:", -1, 160, 146, 50, 10
+EDITTEXT    IDC_I2C_ADDR, 215, 144, 75, 14, ES_AUTOHSCROLL
+LTEXT       "Debounce (ms):", -1, 160, 166, 68, 10
+EDITTEXT    IDC_DEBOUNCE, 232, 164, 58, 14, ES_NUMBER | ES_AUTOHSCROLL
+
+DEFPUSHBUTTON "Save", IDC_SAVE, 160, 210, 60, 18
+PUSHBUTTON    "Cancel", IDC_CANCEL, 230, 210, 60, 18
+END
+
+IDD_WELCOME DIALOGEX 0, 0, 360, 180
+STYLE DS_SETFONT | WS_CAPTION | WS_SYSMENU
+CAPTION "Welcome to LG Input Switch"
+FONT 9, "Segoe UI", 0, 0, 0x1
+BEGIN
+LTEXT "This app lets you switch your monitor input (e.g., DisplayPort ⇄ USB-C) with a hotkey or from the tray.\r\n\r\nWe'll detect your AMD adapters/displays, you choose which monitor and inputs to use, then set your hotkeys.\r\n\r\nClick Next to continue.",
+IDC_WELCOME_TEXT, 10, 10, 340, 110
+DEFPUSHBUTTON "Next", IDC_WELCOME_NEXT, 200, 140, 70, 18
+PUSHBUTTON    "Cancel", IDCANCEL, 280, 140, 70, 18
+END
+IDI_APPICON ICON "app.ico"
