@@ -43,9 +43,13 @@ static std::vector<TargetItem> g_targets;
 static void EnumerateTargets() {
     g_targets.clear();
     
-    // Ensure ADL is initialized. 
-    // Ideally InitADL() guards itself against double-init internally.
-    if (!InitADL()) return;
+    InitADL(); 
+
+    // Check if we actually have the critical function pointer
+    if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
+        return;
+    }
+    // --- FIX END ---
 
     int nAdapters = 0;
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
@@ -54,7 +58,7 @@ static void EnumerateTargets() {
 
     // Allocate memory for adapter info
     lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!lpAdapterInfo) return; // Safety check
+    if (!lpAdapterInfo) return; 
     
     memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
     
@@ -76,12 +80,10 @@ static void EnumerateTargets() {
             for (int j = 0; j < displayCount; ++j) {
                 const auto& di = lpAdlDisplayInfo[j];
 
-                // Need both CONNECTED and MAPPED flags
                 const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
                 if ((di.iDisplayInfoValue & required) != required)
                     continue;
 
-                // Must be mapped to this adapter
                 if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
                     continue;
 
@@ -98,6 +100,16 @@ static void EnumerateTargets() {
             }
         }
     }
+    // Cleanup
+    if (lpAdapterInfo) {
+        free(lpAdapterInfo);
+        lpAdapterInfo = nullptr;
+    }
+    if (lpAdlDisplayInfo) {
+        ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo);
+        lpAdlDisplayInfo = nullptr;
+    }
+}
     if (lpAdapterInfo) {
         free(lpAdapterInfo);
         lpAdapterInfo = nullptr;
@@ -208,16 +220,17 @@ static void MoveSelected(HWND lb, bool up) {
 }
 
 static bool CollectToConfig(HWND hDlg, AppConfig& io) {
-    // Monitor selection
+// Monitor selection
     HWND cb = GetDlgItem(hDlg, IDC_MONITOR);
-    int idx = (int)SendMessage(cb, CB_GETCURSEL, 0, 0);
-    if (idx == CB_ERR && !g_targets.empty()) idx = 0;
-    if (idx != CB_ERR) {
+        // Ensure we actually have targets to select from
+    if (!g_targets.empty()) {
+        int idx = (int)SendMessage(cb, CB_GETCURSEL, 0, 0);
+        if (idx == CB_ERR) idx = 0; // Default to first if nothing selected
+        
         LPARAM data = SendMessage(cb, CB_GETITEMDATA, idx, 0);
         int adapter = 0, display = 0; UnpackAD(data, adapter, display);
         io.targets = { {adapter, display} };
     }
-
     // Inputs with codes
     std::vector<InputDef> inputs;
     if (IsDlgButtonChecked(hDlg, IDC_INPUT_DP) == BST_CHECKED) inputs.push_back({ "DisplayPort","0xD0" });
