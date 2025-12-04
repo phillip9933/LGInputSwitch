@@ -10,17 +10,17 @@
 #include <algorithm>
 #include <sstream>
 #include <set>
-#include <stdio.h> // for swprintf
+#include <stdio.h> 
 
 // Pull in ADL types / constants / globals
-#include "../amdddc/adl.h"        // has ADLPROCS, AdapterInfo, ADL_DISPLAY_* flags
+#include "../amdddc/adl.h"        
 
-extern bool InitADL();            // from your adl.cpp
+extern bool InitADL();            
 
 extern "C" {
-    extern ADLPROCS        adlprocs;             // implemented in adl.cpp
-    extern LPAdapterInfo   lpAdapterInfo;        // implemented in adl.cpp
-    extern LPADLDisplayInfo lpAdlDisplayInfo;    // implemented in adl.cpp
+    extern ADLPROCS        adlprocs;             
+    // Note: We intentionally do NOT use the extern lpAdapterInfo/lpAdlDisplayInfo here
+    // to prevent accidental stomping of the main app's state.
 }
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
@@ -36,7 +36,7 @@ static inline void UnpackAD(LPARAM v, int& adapter, int& display) {
 struct TargetItem {
     int adapterIndex{};
     int displayIndex{};
-    std::wstring label; // e.g., "Adapter 5 - LG ULTRAGEAR+ (Display 0)"
+    std::wstring label; 
 };
 
 static std::vector<TargetItem> g_targets;
@@ -44,83 +44,67 @@ static std::vector<TargetItem> g_targets;
 static void EnumerateTargets() {
     g_targets.clear();
     
-    // 1. Ensure ADL is initialized.
-    // If the main app hasn't initialized ADL yet, we do it here.
+    // 1. Safe Init: Only call InitADL if we absolutely must.
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
         if (!InitADL()) return;
     }
 
-    // 2. Ensure we have the global Adapter List.
-    // If lpAdapterInfo is NULL (first run, or Main App hasn't created it), we create it.
-    // If it IS NOT NULL, we reuse it. This prevents us from invalidating the Main App's pointer.
-    if (!lpAdapterInfo) {
-        int nAdapters = 0;
-        if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
-            return;
-        }
-
-        // Allocate GLOBAL memory. This will persist for the life of the app.
-        lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-        if (!lpAdapterInfo) return; 
-        
-        memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-        
-        // Populate it
-        if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) != 0) {
-            free(lpAdapterInfo);
-            lpAdapterInfo = nullptr;
-            return;
-        }
+    int nAdapters = 0;
+    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
+        return;
     }
 
-    // At this point, lpAdapterInfo is valid and populated.
-    // We need to know how many adapters there are to iterate.
-    int nAdapters = 0;
-    adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters);
+    // 2. ISOLATION: Allocate a PURELY LOCAL buffer. 
+    // We do NOT use the global lpAdapterInfo variable here.
+    LPAdapterInfo localAdapters = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+    if (!localAdapters) return;
+    
+    memset(localAdapters, 0, sizeof(AdapterInfo) * nAdapters);
+    
+    // Get adapter info into our local buffer
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters, sizeof(AdapterInfo) * nAdapters) == 0) {
+        for (int i = 0; i < nAdapters; ++i) {
+            int displayCount = 0;
 
-    // 3. Iterate and populate the UI list
-    for (int i = 0; i < nAdapters; ++i) {
-        int displayCount = 0;
+            // 3. ISOLATION: Use a local pointer for display info.
+            LPADLDisplayInfo localDisplayInfo = nullptr;
 
-        // CRITICAL: Use a LOCAL variable for DisplayInfo.
-        // Do NOT use the global lpAdlDisplayInfo, as the Main App might be holding onto it.
-        LPADLDisplayInfo localDisplayInfo = nullptr;
+            // Get display info for this adapter
+            if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapters[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
+                continue;
 
-        // Get display info for this adapter
-        if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
-            continue;
+            if (localDisplayInfo) {
+                for (int j = 0; j < displayCount; ++j) {
+                    const auto& di = localDisplayInfo[j];
 
-        if (localDisplayInfo) {
-            for (int j = 0; j < displayCount; ++j) {
-                const auto& di = localDisplayInfo[j];
+                    const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+                    if ((di.iDisplayInfoValue & required) != required)
+                        continue;
 
-                // Need both CONNECTED and MAPPED flags
-                const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
-                if ((di.iDisplayInfoValue & required) != required)
-                    continue;
+                    if (localAdapters[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                        continue;
 
-                // Must be mapped to this adapter
-                if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
-                    continue;
+                    TargetItem t;
+                    t.adapterIndex = localAdapters[i].iAdapterIndex;
+                    t.displayIndex = di.displayID.iDisplayLogicalIndex;
 
-                TargetItem t;
-                t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
-                t.displayIndex = di.displayID.iDisplayLogicalIndex;
+                    std::wstring dispName = ToW(std::string(di.strDisplayName));
+                    std::wstringstream ss;
+                    ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
+                    t.label = ss.str();
 
-                std::wstring dispName = ToW(std::string(di.strDisplayName));
-                std::wstringstream ss;
-                ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
-                t.label = ss.str();
-
-                g_targets.push_back(t);
+                    g_targets.push_back(t);
+                }
+                // 4. CLEANUP: Free the local display info immediately.
+                ADL_Main_Memory_Free((void**)&localDisplayInfo);
             }
-            // Free the LOCAL display info.
-            ADL_Main_Memory_Free((void**)&localDisplayInfo);
         }
     }
     
-    // 4. DO NOT FREE lpAdapterInfo. 
-    // Leave it populated for the rest of the application to use.
+    // 5. CLEANUP: Free our local adapter buffer.
+    if (localAdapters) {
+        free(localAdapters);
+    }
 }
 
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
@@ -167,7 +151,7 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
     SendMessage(lb, LB_RESETCONTENT, 0, 0);
 
-    // Enabled labels (based on the checkboxes / cfg.inputs)
+    // Enabled labels
     std::set<std::string> enabled;
     for (const auto& in : cfg.inputs) enabled.insert(in.label);
 
@@ -181,7 +165,7 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
             used.insert(name);
         }
     }
-    // 2) Append any remaining enabled inputs not already in the list
+    // 2) Append any remaining enabled inputs
     for (const auto& in : cfg.inputs) {
         if (!used.count(in.label)) {
             std::wstring ws = ToW(in.label);
@@ -192,11 +176,11 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
 
     SendMessage(lb, LB_SETCURSEL, 0, 0);
 
-    // I2C addr (show value or default 0x50)
+    // I2C addr
     std::wstring wI2C = ToW(cfg.i2cSourceAddr.empty() ? std::string("0x50") : cfg.i2cSourceAddr);
     SetDlgItemTextW(hDlg, IDC_I2C_ADDR, wI2C.c_str());
 
-    // Debounce (show value or default 750)
+    // Debounce
     int dbVal = (cfg.debounceMs > 0 ? cfg.debounceMs : 750);
     wchar_t bufDB[32];
     _snwprintf_s(bufDB, _TRUNCATE, L"%d", dbVal);
