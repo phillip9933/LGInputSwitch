@@ -18,9 +18,7 @@
 extern bool InitADL();            
 
 extern "C" {
-    extern ADLPROCS        adlprocs;             
-    // Note: We intentionally do NOT use the extern lpAdapterInfo/lpAdlDisplayInfo here
-    // to prevent accidental stomping of the main app's state.
+    extern ADLPROCS adlprocs;             
 }
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
@@ -39,12 +37,15 @@ struct TargetItem {
     std::wstring label; 
 };
 
+// Global Cache
 static std::vector<TargetItem> g_targets;
 
-static void EnumerateTargets() {
-    g_targets.clear();
-    
-    // 1. Safe Init: Only call InitADL if we absolutely must.
+void PreloadTargets() {
+    // 1. CACHE CHECK: If we already have targets, STOP.
+    // This protects the app from querying ADL while hotkeys are active.
+    if (!g_targets.empty()) return;
+
+    // 2. Init ADL
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
         if (!InitADL()) return;
     }
@@ -54,22 +55,17 @@ static void EnumerateTargets() {
         return;
     }
 
-    // 2. ISOLATION: Allocate a PURELY LOCAL buffer. 
-    // We do NOT use the global lpAdapterInfo variable here.
+    // 3. Local Memory Allocation (Safe Mode)
     LPAdapterInfo localAdapters = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
     if (!localAdapters) return;
     
     memset(localAdapters, 0, sizeof(AdapterInfo) * nAdapters);
     
-    // Get adapter info into our local buffer
     if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters, sizeof(AdapterInfo) * nAdapters) == 0) {
         for (int i = 0; i < nAdapters; ++i) {
             int displayCount = 0;
-
-            // 3. ISOLATION: Use a local pointer for display info.
             LPADLDisplayInfo localDisplayInfo = nullptr;
 
-            // Get display info for this adapter
             if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapters[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
                 continue;
 
@@ -95,13 +91,11 @@ static void EnumerateTargets() {
 
                     g_targets.push_back(t);
                 }
-                // 4. CLEANUP: Free the local display info immediately.
                 ADL_Main_Memory_Free((void**)&localDisplayInfo);
             }
         }
     }
     
-    // 5. CLEANUP: Free our local adapter buffer.
     if (localAdapters) {
         free(localAdapters);
     }
@@ -273,7 +267,11 @@ static INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
     switch (msg) {
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
-        EnumerateTargets();
+        
+        // IMPORTANT: We call PreloadTargets here as a fallback, 
+        // BUT it relies on the cache check to return immediately if already loaded.
+        PreloadTargets(); 
+        
         FillFromConfig(hDlg, *s_cfg);
 
         // Seed order list with currently checked inputs if empty
