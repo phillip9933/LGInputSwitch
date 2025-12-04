@@ -10,12 +10,12 @@
 #include <algorithm>
 #include <sstream>
 #include <set>
-#include <stdio.h> // for swprintf
+#include <stdio.h> 
 
 // Pull in ADL types / constants / globals
-#include "../amdddc/adl.h"        // has ADLPROCS, AdapterInfo, ADL_DISPLAY_* flags
+#include "../amdddc/adl.h"        
 
-extern bool InitADL();            // from adl.cpp
+extern bool InitADL();            
 
 extern "C" {
     extern ADLPROCS        adlprocs;
@@ -258,8 +258,16 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     int count = (int)SendMessage(lb, LB_GETCOUNT, 0, 0);
     io.cycleOrder.clear();
     for (int i = 0; i < count; ++i) {
-        wchar_t w[128]; SendMessage(lb, LB_GETTEXT, i, (LPARAM)w);
-        std::string s(w, w + wcslen(w));
+        wchar_t w[128]; 
+        SendMessage(lb, LB_GETTEXT, i, (LPARAM)w);
+        
+        // --- FIX FOR WARNING C4244 ---
+        // Convert wide string (UI) back to UTF-8 (Config) safely
+        int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+        std::string s(len > 0 ? len - 1 : 0, '\0');
+        if (len > 0) WideCharToMultiByte(CP_UTF8, 0, w, -1, &s[0], len, nullptr, nullptr);
+        // -----------------------------
+        
         if (enabledLabels.count(s)) io.cycleOrder.push_back(s);
     }
     if (io.cycleOrder.empty()) {
