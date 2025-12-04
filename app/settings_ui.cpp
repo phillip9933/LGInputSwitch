@@ -83,13 +83,10 @@ static void EnumerateTargets() {
         for (int j = 0; j < displayCount; ++j) {
             const auto& di = localDisplayInfo[j];
 
-            // For each display, check its status. Use the display only if it's connected AND mapped (iDisplayInfoValue: bit 0 and 1 )
-            // NOTE: This logic matches amdddc-windows.cpp for compatibility, even though the operator precedence
-            // creates a technically incorrect check (& has higher precedence than |). The working CLI tool uses
-            // this same pattern, so we preserve it here to ensure displays are detected consistently.
-            if ((ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED) !=
-                (ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED & di.iDisplayInfoValue))
-                continue;   // Skip the not connected or non-active displays
+            // Need both CONNECTED and MAPPED flags
+            const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+            if ((di.iDisplayInfoValue & required) != required)
+                continue;
 
             // Ensure the display is mapped to this adapter (compare fields from localAdapters)
             if (adapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
