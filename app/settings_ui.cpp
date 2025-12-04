@@ -39,16 +39,15 @@ struct TargetItem {
     std::wstring label; // e.g., "Adapter 5 - LG ULTRAGEAR+ (Display 0)"
 };
 
+// Global cache of targets, populated once at startup
 static std::vector<TargetItem> g_targets;
 
-static void EnumerateTargets() {
-    // 1. CACHE CHECK: If we already found targets, DO NOT touch ADL again.
-    // This prevents the Settings UI from repeatedly poking the driver and risking a reset.
-    if (!g_targets.empty()) {
-        return;
-    }
+// EXPORTED FUNCTION: Call this from main.cpp
+void RefreshTargetList() {
+    g_targets.clear();
     
-    // 2. Ensure ADL is initialized, but be gentle.
+    // Ensure ADL is initialized.
+    // If main.cpp calls this right after InitADL(), this check is redundant but safe.
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
         if (!InitADL()) return;
     }
@@ -58,72 +57,51 @@ static void EnumerateTargets() {
         return;
     }
 
-    // 3. Determine if we can reuse the global state (PREFFERED) or need a local buffer.
-    LPAdapterInfo pInfoToUse = nullptr;
-    bool usingGlobalInfo = false;
+    // Allocate local buffer for Adapters to avoid touching global state if possible
+    LPAdapterInfo localAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+    if (!localAdapterInfo) return;
+    
+    memset(localAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
+    
+    // Get adapter info
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
+        for (int i = 0; i < nAdapters; ++i) {
+            int displayCount = 0;
+            LPADLDisplayInfo localDisplayInfo = nullptr;
 
-    if (lpAdapterInfo != nullptr) {
-        // The Main App has already populated this. USE IT AS IS.
-        // DO NOT call ADL_Adapter_AdapterInfo_Get again, as it might reset the context.
-        pInfoToUse = lpAdapterInfo;
-        usingGlobalInfo = true;
-    }
-    else {
-        // Fallback: Allocate local buffer only if global is missing (Startup scenario?)
-        pInfoToUse = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-        if (!pInfoToUse) return;
-        memset(pInfoToUse, 0, sizeof(AdapterInfo) * nAdapters);
+            // Get display info for this adapter
+            if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
+                continue;
 
-        // Only call Get if we are using our own local buffer
-        if (adlprocs.ADL_Adapter_AdapterInfo_Get(pInfoToUse, sizeof(AdapterInfo) * nAdapters) != 0) {
-            free(pInfoToUse);
-            return;
-        }
-    }
+            if (localDisplayInfo) {
+                for (int j = 0; j < displayCount; ++j) {
+                    const auto& di = localDisplayInfo[j];
 
-    // 4. Iterate and Get Display Info
-    // We use a LOCAL variable for DisplayInfo to ensure we don't stomp the global lpAdlDisplayInfo
-    for (int i = 0; i < nAdapters; ++i) {
-        int displayCount = 0;
-        LPADLDisplayInfo localDisplayInfo = nullptr;
+                    const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+                    if ((di.iDisplayInfoValue & required) != required)
+                        continue;
 
-        // Get display info for this adapter
-        if (adlprocs.ADL_Display_DisplayInfo_Get(pInfoToUse[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
-            continue;
+                    if (localAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                        continue;
 
-        if (localDisplayInfo) {
-            for (int j = 0; j < displayCount; ++j) {
-                const auto& di = localDisplayInfo[j];
+                    TargetItem t;
+                    t.adapterIndex = localAdapterInfo[i].iAdapterIndex;
+                    t.displayIndex = di.displayID.iDisplayLogicalIndex;
 
-                // Need both CONNECTED and MAPPED flags
-                const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
-                if ((di.iDisplayInfoValue & required) != required)
-                    continue;
+                    std::wstring dispName = ToW(std::string(di.strDisplayName));
+                    std::wstringstream ss;
+                    ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
+                    t.label = ss.str();
 
-                // Must be mapped to this adapter
-                if (pInfoToUse[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
-                    continue;
-
-                TargetItem t;
-                t.adapterIndex = pInfoToUse[i].iAdapterIndex;
-                t.displayIndex = di.displayID.iDisplayLogicalIndex;
-
-                std::wstring dispName = ToW(std::string(di.strDisplayName));
-                std::wstringstream ss;
-                ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
-                t.label = ss.str();
-
-                g_targets.push_back(t);
+                    g_targets.push_back(t);
+                }
+                ADL_Main_Memory_Free((void**)&localDisplayInfo);
             }
-            // Free the display info (it was allocated by ADL for this specific call)
-            ADL_Main_Memory_Free((void**)&localDisplayInfo);
         }
     }
     
-    // 5. Cleanup
-    // Only free pInfoToUse if we allocated it ourselves. If it's global, LEAVE IT ALONE.
-    if (!usingGlobalInfo && pInfoToUse) {
-        free(pInfoToUse);
+    if (localAdapterInfo) {
+        free(localAdapterInfo);
     }
 }
 
@@ -171,7 +149,7 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
     SendMessage(lb, LB_RESETCONTENT, 0, 0);
 
-    // Enabled labels (based on the checkboxes / cfg.inputs)
+    // Enabled labels
     std::set<std::string> enabled;
     for (const auto& in : cfg.inputs) enabled.insert(in.label);
 
@@ -185,7 +163,7 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
             used.insert(name);
         }
     }
-    // 2) Append any remaining enabled inputs not already in the list
+    // 2) Append any remaining enabled inputs
     for (const auto& in : cfg.inputs) {
         if (!used.count(in.label)) {
             std::wstring ws = ToW(in.label);
@@ -196,11 +174,11 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
 
     SendMessage(lb, LB_SETCURSEL, 0, 0);
 
-    // I2C addr (show value or default 0x50)
+    // I2C addr
     std::wstring wI2C = ToW(cfg.i2cSourceAddr.empty() ? std::string("0x50") : cfg.i2cSourceAddr);
     SetDlgItemTextW(hDlg, IDC_I2C_ADDR, wI2C.c_str());
 
-    // Debounce (show value or default 750)
+    // Debounce
     int dbVal = (cfg.debounceMs > 0 ? cfg.debounceMs : 750);
     wchar_t bufDB[32];
     _snwprintf_s(bufDB, _TRUNCATE, L"%d", dbVal);
@@ -280,7 +258,7 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
 
     // I2C + debounce
     io.i2cSourceAddr = GetEditA(hDlg, IDC_I2C_ADDR);
-    if (io.i2cSourceAddr.empty()) io.i2cSourceAddr = "0x50";  // default LG alt path
+    if (io.i2cSourceAddr.empty()) io.i2cSourceAddr = "0x50";
 
     std::string d = GetEditA(hDlg, IDC_DEBOUNCE);
     io.debounceMs = d.empty() ? 750 : std::max(0, atoi(d.c_str()));
@@ -293,10 +271,10 @@ static INT_PTR CALLBACK DlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lPara
     switch (msg) {
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
-        EnumerateTargets();
+        // DO NOT ENUMERATE HERE. We use the global list populated at startup.
         FillFromConfig(hDlg, *s_cfg);
 
-        // Seed order list with currently checked inputs if empty
+        // Seed order list
         HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
         if (SendMessage(lb, LB_GETCOUNT, 0, 0) == 0) {
             if (IsDlgButtonChecked(hDlg, IDC_INPUT_DP) == BST_CHECKED)    SendMessage(lb, LB_ADDSTRING, 0, (LPARAM)L"DisplayPort");
