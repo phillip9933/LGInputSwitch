@@ -14,6 +14,15 @@
 #include <chrono>
 #include <set>
 
+// --- ADL GLOBALS ---
+#include "../amdddc/adl.h"
+extern bool InitADL();
+extern "C" {
+    extern ADLPROCS      adlprocs;
+    extern LPAdapterInfo lpAdapterInfo; // POPULATE THIS HERE
+}
+// -------------------
+
 static const wchar_t* kWndClass = L"LGInputSwitchHiddenWnd";
 static UINT HKID_CYCLE = 1;
 static std::map<UINT, std::string> g_directById;
@@ -24,11 +33,35 @@ static NOTIFYICONDATA nid{};
 static AppConfig g_cfg;
 static Target g_target;
 
-// Dynamic input menu id range
 static const UINT ID_INPUT_BASE = 41000;
-static std::map<UINT, size_t> g_menuInputIdToIndex; // menu id -> index into g_cfg.inputs
-
+static std::map<UINT, size_t> g_menuInputIdToIndex;
 static const UINT WM_SETTINGS_SAVED = WM_APP + 2;
+
+// --- INIT HELPER (LOCAL) ---
+static void InitADLAndState() {
+    // 1. Init Library
+    if (!InitADL()) return;
+
+    // 2. Get Count
+    int nAdapters = 0;
+    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
+        return;
+    }
+
+    // 3. Allocate Global Memory if needed
+    if (!lpAdapterInfo) {
+        lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+        if (lpAdapterInfo) {
+            memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
+            // 4. Fill Global Memory
+            if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) != 0) {
+                free(lpAdapterInfo);
+                lpAdapterInfo = nullptr;
+            }
+        }
+    }
+}
+// ---------------------------
 
 static void UnregisterAllHotkeys(HWND hwnd) {
     UnregisterHotKey(hwnd, HKID_CYCLE);
@@ -45,11 +78,7 @@ static void Balloon(const wchar_t* msg) {
 
 static HMENU Menu() {
     HMENU h = CreatePopupMenu();
-
-    // Cycle
     AppendMenu(h, MF_STRING, ID_TRAY_CYCLE, L"Cycle");
-
-    // Dynamic inputs from config
     AppendMenu(h, MF_SEPARATOR, 0, nullptr);
     g_menuInputIdToIndex.clear();
     for (size_t i = 0; i < g_cfg.inputs.size(); ++i) {
@@ -59,8 +88,6 @@ static HMENU Menu() {
         g_menuInputIdToIndex[id] = i;
         AppendMenu(h, MF_STRING, id, label.c_str());
     }
-
-    // Settings / Exit
     AppendMenu(h, MF_SEPARATOR, 0, nullptr);
     AppendMenu(h, MF_STRING, ID_TRAY_SETTINGS, L"Settings...");
     AppendMenu(h, MF_SEPARATOR, 0, nullptr);
@@ -88,23 +115,16 @@ static void RegisterHK(HWND hwnd) {
 static std::vector<InputDef> OrderedInputs() {
     std::map<std::string, const InputDef*> enabled;
     for (auto& in : g_cfg.inputs) enabled[in.label] = &in;
-
     std::vector<InputDef> out;
     std::set<std::string> used;
-
     for (auto& name : g_cfg.cycleOrder) {
         auto it = enabled.find(name);
-        if (it != enabled.end()) {
-            out.push_back(*it->second);
-            used.insert(name);
-        }
+        if (it != enabled.end()) { out.push_back(*it->second); used.insert(name); }
     }
     for (auto& kv : enabled) {
         if (!used.count(kv.first)) out.push_back(*kv.second);
     }
-    if (out.empty()) {
-        for (auto& in : g_cfg.inputs) out.push_back(in);
-    }
+    if (out.empty()) for (auto& in : g_cfg.inputs) out.push_back(in);
     return out;
 }
 
@@ -121,9 +141,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // --- SINGLE INIT ---
-        InitializeSystem();
-        // -------------------
+        // --- INIT ADL HERE ---
+        InitADLAndState();
+        // ---------------------
 
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
