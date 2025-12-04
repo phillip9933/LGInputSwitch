@@ -17,14 +17,12 @@
 
 extern bool InitADL();            
 
-// --- FIX: RESTORE extern "C" ---
-// This forces us to link to the C-style globals defined in adl.cpp.
-// Without this, we create shadow C++ variables that app_toggle.cpp can't see.
-extern "C" {
-    extern ADLPROCS        adlprocs;
-    extern LPAdapterInfo   lpAdapterInfo;
-}
-// -------------------------------
+// --- FIX: NO extern "C" ---
+// We link to the standard C++ globals defined in adl.cpp.
+// This ensures app_toggle.cpp (Hotkeys) and this file see the SAME memory.
+extern ADLPROCS        adlprocs;
+extern LPAdapterInfo   lpAdapterInfo;
+// --------------------------
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -212,6 +210,7 @@ static void MoveSelected(HWND lb, bool up) {
     wchar_t buf[128]; 
     SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     
+    // Convert W to A for internal logic
     int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
     std::string s(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
