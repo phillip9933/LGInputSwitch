@@ -18,7 +18,8 @@
 extern bool InitADL();            
 
 extern "C" {
-    extern ADLPROCS adlprocs;             
+    extern ADLPROCS        adlprocs;             
+    extern LPAdapterInfo   lpAdapterInfo; // WE USE THIS GLOBAL NOW
 }
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
@@ -42,7 +43,6 @@ static std::vector<TargetItem> g_targets;
 
 void PreloadTargets() {
     // 1. CACHE CHECK: If we already have targets, STOP.
-    // This protects the app from querying ADL while hotkeys are active.
     if (!g_targets.empty()) return;
 
     // 2. Init ADL
@@ -55,18 +55,26 @@ void PreloadTargets() {
         return;
     }
 
-    // 3. Local Memory Allocation (Safe Mode)
-    LPAdapterInfo localAdapters = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!localAdapters) return;
+    // 3. GLOBAL MEMORY ALLOCATION
+    // We populate the GLOBAL lpAdapterInfo because hotkeys need it.
+    // If it's already allocated (unlikely at startup), free it first.
+    if (lpAdapterInfo) {
+        free(lpAdapterInfo);
+        lpAdapterInfo = nullptr;
+    }
     
-    memset(localAdapters, 0, sizeof(AdapterInfo) * nAdapters);
+    lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+    if (!lpAdapterInfo) return;
     
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters, sizeof(AdapterInfo) * nAdapters) == 0) {
+    memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
+    
+    // Fill the Global Adapter Info
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
         for (int i = 0; i < nAdapters; ++i) {
             int displayCount = 0;
             LPADLDisplayInfo localDisplayInfo = nullptr;
 
-            if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapters[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
+            if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
                 continue;
 
             if (localDisplayInfo) {
@@ -77,11 +85,11 @@ void PreloadTargets() {
                     if ((di.iDisplayInfoValue & required) != required)
                         continue;
 
-                    if (localAdapters[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                    if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
                         continue;
 
                     TargetItem t;
-                    t.adapterIndex = localAdapters[i].iAdapterIndex;
+                    t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
                     t.displayIndex = di.displayID.iDisplayLogicalIndex;
 
                     std::wstring dispName = ToW(std::string(di.strDisplayName));
@@ -95,10 +103,8 @@ void PreloadTargets() {
             }
         }
     }
-    
-    if (localAdapters) {
-        free(localAdapters);
-    }
+    // DO NOT FREE lpAdapterInfo! 
+    // It remains alive for the hotkeys.
 }
 
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
