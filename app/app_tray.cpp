@@ -14,15 +14,6 @@
 #include <chrono>
 #include <set>
 
-// --- ADL GLOBALS ---
-#include "../amdddc/adl.h"
-extern bool InitADL();
-extern "C" {
-    extern ADLPROCS      adlprocs;
-    extern LPAdapterInfo lpAdapterInfo;
-}
-// -------------------
-
 static const wchar_t* kWndClass = L"LGInputSwitchHiddenWnd";
 static UINT HKID_CYCLE = 1;
 static std::map<UINT, std::string> g_directById;
@@ -34,40 +25,8 @@ static AppConfig g_cfg;
 static Target g_target;
 
 static const UINT ID_INPUT_BASE = 41000;
-static std::map<UINT, size_t> g_menuInputIdToIndex;
+static std::map<UINT, size_t> g_menuInputIdToIndex; 
 static const UINT WM_SETTINGS_SAVED = WM_APP + 2;
-
-// ─────────────────────────────────────────────
-// ADL Initialization Helper
-// Ensures lpAdapterInfo is ALWAYS populated
-// ─────────────────────────────────────────────
-static void InitADLAndState()
-{
-    // Prevent re-init
-    if (lpAdapterInfo != nullptr)
-        return;
-
-    if (!InitADL())
-        return;
-
-    int nAdapters = 0;
-    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0)
-        return;
-
-    lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!lpAdapterInfo) return;
-
-    memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) != 0) {
-        free(lpAdapterInfo);
-        lpAdapterInfo = nullptr;
-    }
-}
-
-// ─────────────────────────────────────────────
-// Misc helpers
-// ─────────────────────────────────────────────
 
 static void UnregisterAllHotkeys(HWND hwnd) {
     UnregisterHotKey(hwnd, HKID_CYCLE);
@@ -113,7 +72,7 @@ static void RegisterHK(HWND hwnd) {
         if (ParseHotkey(kv.second, h2)) {
             UINT id = base++;
             if (RegisterHotKey(hwnd, id, h2.fsModifiers, h2.vk))
-                g_directById[id] = kv.first;
+                g_directById[id] = kv.first; // label
         }
     }
 }
@@ -134,12 +93,8 @@ static std::vector<InputDef> OrderedInputs() {
     return out;
 }
 
-// ─────────────────────────────────────────────
-// Hidden window WndProc
-// ─────────────────────────────────────────────
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-
     case WM_CREATE: {
         nid.cbSize = sizeof(nid);
         nid.hWnd = hwnd;
@@ -151,8 +106,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // Safety re-init
-        InitADLAndState();
+        // --- CALL CENTRAL INIT ---
+        // This runs the logic in settings_ui.cpp (with extern "C")
+        // ensuring we populate the correct global pointer.
+        InitializeSystem();
+        // -------------------------
 
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
@@ -168,7 +126,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         RegisterHK(hwnd);
         return 0;
     }
-
     case WM_HOTKEY: {
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastPress).count() < g_cfg.debounceMs)
@@ -203,7 +160,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         return 0;
     }
-
     case WM_APP + 1: {
         if (lParam == WM_RBUTTONUP) {
             HMENU m = Menu();
@@ -214,7 +170,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         return 0;
     }
-
     case WM_COMMAND: {
         const UINT cmd = LOWORD(wParam);
         if (cmd == ID_TRAY_SETTINGS) {
@@ -245,7 +200,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
         return 0;
     }
-
     case WM_DESTROY:
         Shell_NotifyIcon(NIM_DELETE, &nid);
         if (nid.hIcon) DestroyIcon(nid.hIcon);
@@ -270,16 +224,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-// ─────────────────────────────────────────────
-// Entry point for tray application
-// ─────────────────────────────────────────────
 int RunTrayApp() {
-
-    // ⭐ NEW: Ensure ADL is ready BEFORE dialogs
-    InitADLAndState();
-
     WNDCLASSEX wc{};
     wc.cbSize = sizeof(wc);
+    wc.style = 0;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = kWndClass;
@@ -288,9 +236,7 @@ int RunTrayApp() {
         IMAGE_ICON, 16, 16, 0);
     RegisterClassEx(&wc);
 
-    HWND hwnd = CreateWindowEx(0, kWndClass, L"", 0, 0, 0, 0, 0,
-        nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
-
+    HWND hwnd = CreateWindowEx(0, kWndClass, L"", 0, 0, 0, 0, 0, nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 
     MSG msg;
