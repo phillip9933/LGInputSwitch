@@ -122,8 +122,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         Shell_NotifyIcon(NIM_ADD, &nid);
 
         // --- SINGLE INIT ---
-        // This ensures ADL is ready and Global lpAdapterInfo is populated
-        // using the correct linkage (extern "C").
         InitializeSystem();
         // -------------------
 
