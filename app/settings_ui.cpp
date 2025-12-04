@@ -47,7 +47,7 @@ static void EnumerateTargets() {
     // Attempt to initialize ADL.
     InitADL(); 
 
-    // Safety check: ensure ADL is loaded and function pointers exist
+    // Safety check
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
         return;
     }
@@ -57,29 +57,33 @@ static void EnumerateTargets() {
         return;
     }
 
-    // Allocate memory for adapter info
-    lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!lpAdapterInfo) return; 
+    // USE LOCAL VARIABLES, DO NOT TOUCH GLOBALS
+    LPAdapterInfo localAdapterInfo = nullptr;
+    LPADLDisplayInfo localDisplayInfo = nullptr;
+
+    // Allocate memory for local adapter info
+    localAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+    if (!localAdapterInfo) return; 
     
-    memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
+    memset(localAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
     
-    // Get adapter info
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
+    // Get adapter info into LOCAL pointer
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
         for (int i = 0; i < nAdapters; ++i) {
             int displayCount = 0;
 
-            // Cleanup previous display info if it exists
-            if (lpAdlDisplayInfo) { 
-                ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo); 
-                lpAdlDisplayInfo = nullptr; 
+            // Cleanup previous display info if it exists (for the local pointer)
+            if (localDisplayInfo) { 
+                ADL_Main_Memory_Free((void**)&localDisplayInfo); 
+                localDisplayInfo = nullptr; 
             }
 
             // Get display info for this adapter
-            if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &lpAdlDisplayInfo, 0) != 0)
+            if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
                 continue;
 
             for (int j = 0; j < displayCount; ++j) {
-                const auto& di = lpAdlDisplayInfo[j];
+                const auto& di = localDisplayInfo[j];
 
                 // Need both CONNECTED and MAPPED flags
                 const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
@@ -87,11 +91,11 @@ static void EnumerateTargets() {
                     continue;
 
                 // Must be mapped to this adapter
-                if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                if (localAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
                     continue;
 
                 TargetItem t;
-                t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
+                t.adapterIndex = localAdapterInfo[i].iAdapterIndex;
                 t.displayIndex = di.displayID.iDisplayLogicalIndex;
 
                 std::wstring dispName = ToW(std::string(di.strDisplayName));
@@ -104,17 +108,16 @@ static void EnumerateTargets() {
         }
     }
     
-    // Cleanup
-    if (lpAdapterInfo) {
-        free(lpAdapterInfo);
-        lpAdapterInfo = nullptr;
+    // Cleanup LOCAL pointers only
+    if (localAdapterInfo) {
+        free(localAdapterInfo);
+        localAdapterInfo = nullptr;
     }
-    if (lpAdlDisplayInfo) {
-        ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo);
-        lpAdlDisplayInfo = nullptr;
+    if (localDisplayInfo) {
+        ADL_Main_Memory_Free((void**)&localDisplayInfo);
+        localDisplayInfo = nullptr;
     }
 }
-
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     // Monitor combo
     HWND cb = GetDlgItem(hDlg, IDC_MONITOR);
