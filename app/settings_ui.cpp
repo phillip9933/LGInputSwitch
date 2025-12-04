@@ -42,45 +42,69 @@ static std::vector<TargetItem> g_targets;
 
 static void EnumerateTargets() {
     g_targets.clear();
+    
+    // Ensure ADL is initialized. 
+    // Ideally InitADL() guards itself against double-init internally.
     if (!InitADL()) return;
 
     int nAdapters = 0;
-    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) return;
+    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
+        return;
+    }
 
+    // Allocate memory for adapter info
     lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+    if (!lpAdapterInfo) return; // Safety check
+    
     memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-    adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters);
+    
+    // Get adapter info
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
+        for (int i = 0; i < nAdapters; ++i) {
+            int displayCount = 0;
 
-    for (int i = 0; i < nAdapters; ++i) {
-        int displayCount = 0;
+            // Cleanup previous display info if it exists
+            if (lpAdlDisplayInfo) { 
+                ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo); 
+                lpAdlDisplayInfo = nullptr; 
+            }
 
-        if (lpAdlDisplayInfo) { ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo); lpAdlDisplayInfo = nullptr; }
-        if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &lpAdlDisplayInfo, 0) != 0)
-            continue;
-
-        for (int j = 0; j < displayCount; ++j) {
-            const auto& di = lpAdlDisplayInfo[j];
-
-            // need both CONNECTED and MAPPED flags
-            const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
-            if ((di.iDisplayInfoValue & required) != required)
+            // Get display info for this adapter
+            if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &lpAdlDisplayInfo, 0) != 0)
                 continue;
 
-            // must be mapped to this adapter
-            if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
-                continue;
+            for (int j = 0; j < displayCount; ++j) {
+                const auto& di = lpAdlDisplayInfo[j];
 
-            TargetItem t;
-            t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
-            t.displayIndex = di.displayID.iDisplayLogicalIndex;
+                // Need both CONNECTED and MAPPED flags
+                const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+                if ((di.iDisplayInfoValue & required) != required)
+                    continue;
 
-            std::wstring dispName = ToW(std::string(di.strDisplayName));
-            std::wstringstream ss;
-            ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
-            t.label = ss.str();
+                // Must be mapped to this adapter
+                if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                    continue;
 
-            g_targets.push_back(t);
+                TargetItem t;
+                t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
+                t.displayIndex = di.displayID.iDisplayLogicalIndex;
+
+                std::wstring dispName = ToW(std::string(di.strDisplayName));
+                std::wstringstream ss;
+                ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
+                t.label = ss.str();
+
+                g_targets.push_back(t);
+            }
         }
+    }
+    if (lpAdapterInfo) {
+        free(lpAdapterInfo);
+        lpAdapterInfo = nullptr;
+    }
+    if (lpAdlDisplayInfo) {
+        ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo);
+        lpAdlDisplayInfo = nullptr;
     }
 }
 
