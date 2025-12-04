@@ -6,6 +6,7 @@
 #include "settings_ui.h"
 #include "welcome_ui.h"
 #include "../resource/resource.h"
+
 #include <windows.h>
 #include <shellapi.h>
 #include <vector>
@@ -120,9 +121,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // --- FIX: INITIALIZE SYSTEM ONCE HERE ---
+        // --- SINGLE INIT ---
+        // This ensures ADL is ready and Global lpAdapterInfo is populated
+        // using the correct linkage (extern "C").
         InitializeSystem();
-        // ----------------------------------------
+        // -------------------
 
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
