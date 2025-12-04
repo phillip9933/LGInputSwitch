@@ -44,20 +44,22 @@ static std::vector<TargetItem> g_targets;
 static void EnumerateTargets() {
     g_targets.clear();
     
-    // Attempt to initialize ADL.
-    InitADL(); 
-
-    // Safety check
+    // --- CRITICAL FIX START ---
+    // Only call InitADL if we don't have the function pointers yet.
+    // Calling it unconditionally breaks the existing context used by hotkeys.
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
-        return;
+        if (!InitADL()) {
+            return; // Failed to init
+        }
     }
+    // --- CRITICAL FIX END ---
 
     int nAdapters = 0;
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
-    // USE LOCAL VARIABLES, DO NOT TOUCH GLOBALS
+    // Use LOCAL pointers to avoid stomping the global ones used by the main app
     LPAdapterInfo localAdapterInfo = nullptr;
     LPADLDisplayInfo localDisplayInfo = nullptr;
 
@@ -67,12 +69,12 @@ static void EnumerateTargets() {
     
     memset(localAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
     
-    // Get adapter info into LOCAL pointer
+    // Get adapter info
     if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
         for (int i = 0; i < nAdapters; ++i) {
             int displayCount = 0;
 
-            // Cleanup previous display info if it exists (for the local pointer)
+            // Cleanup previous display info if it exists
             if (localDisplayInfo) { 
                 ADL_Main_Memory_Free((void**)&localDisplayInfo); 
                 localDisplayInfo = nullptr; 
@@ -108,7 +110,7 @@ static void EnumerateTargets() {
         }
     }
     
-    // Cleanup LOCAL pointers only
+    // Cleanup local pointers
     if (localAdapterInfo) {
         free(localAdapterInfo);
         localAdapterInfo = nullptr;
@@ -118,6 +120,7 @@ static void EnumerateTargets() {
         localDisplayInfo = nullptr;
     }
 }
+
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     // Monitor combo
     HWND cb = GetDlgItem(hDlg, IDC_MONITOR);
