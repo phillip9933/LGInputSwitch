@@ -1,5 +1,4 @@
 name: Build LGInputSwitch
-
 on:
   push:
     branches: [ "main" ]
@@ -15,9 +14,9 @@ jobs:
       uses: microsoft/setup-msbuild@v2
     - name: Build Solution
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=Release /p:Platform=x64 LGInputSwitch.sln
+      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:OutDir=${{ github.workspace }}\BuildOutput\ LGInputSwitch.sln
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: LGInputSwitch-Build
-        path: x64/Release/*.exe
+        path: BuildOutput\LGInputSwitch.exe
