@@ -6,6 +6,7 @@
 #include "settings_ui.h"
 #include "welcome_ui.h"
 #include "../resource/resource.h"
+
 #include <windows.h>
 #include <shellapi.h>
 #include <vector>
@@ -26,6 +27,9 @@ static Target g_target;
 // Dynamic input menu id range
 static const UINT ID_INPUT_BASE = 41000;
 static std::map<UINT, size_t> g_menuInputIdToIndex; // menu id -> index into g_cfg.inputs
+
+// Message posted by settings dialog when user saves
+static const UINT WM_SETTINGS_SAVED = WM_APP + 2;
 
 static void UnregisterAllHotkeys(HWND hwnd) {
     UnregisterHotKey(hwnd, HKID_CYCLE);
@@ -83,14 +87,14 @@ static void RegisterHK(HWND hwnd) {
 }
 
 static std::vector<InputDef> OrderedInputs() {
-    // Build a map of enabled inputs by label
+    // Build map of enabled inputs
     std::map<std::string, const InputDef*> enabled;
     for (auto& in : g_cfg.inputs) enabled[in.label] = &in;
 
     std::vector<InputDef> out;
     std::set<std::string> used;
 
-    // 1) Take items from cycleOrder that are enabled
+    // 1) take items from cycleOrder that are enabled
     for (auto& name : g_cfg.cycleOrder) {
         auto it = enabled.find(name);
         if (it != enabled.end()) {
@@ -98,11 +102,11 @@ static std::vector<InputDef> OrderedInputs() {
             used.insert(name);
         }
     }
-    // 2) Append any remaining enabled inputs not already included
+    // 2) append remaining enabled inputs
     for (auto& kv : enabled) {
         if (!used.count(kv.first)) out.push_back(*kv.second);
     }
-    // 3) If still empty (edge case), just return enabled inputs in their stored order
+    // fallback
     if (out.empty()) {
         for (auto& in : g_cfg.inputs) out.push_back(in);
     }
@@ -119,20 +123,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_APP + 1;
         nid.hIcon = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON),
-            IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
+                                     IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
-
-        // --- FIX START ---
-        // Initialize ADL and populate the Global lpAdapterInfo variable.
-        // This ensures hotkeys have the data they need immediately.
-        PreloadTargets();
-        // --- FIX END ---
 
         // First-run flow: LoadConfig returns false if file missing/bad
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
-            if (!ShowWelcomeDialog(hwnd) || !ShowSettingsDialog(hwnd, g_cfg)) {
+            // First-run: show Welcome (modal) and then settings (modal) so user configures before hotkeys
+            if (!ShowWelcomeDialog(hwnd) || !ShowSettingsDialogModal(hwnd, g_cfg)) {
                 DestroyWindow(hwnd);
                 return 0;
             }
@@ -156,19 +155,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 std::wstring msg = (g_cycleIndex >= 0 && g_cycleIndex < (int)ord.size())
                     ? ToW(ord[g_cycleIndex].label) : L"Switched";
                 Balloon(msg.c_str());
+            } else {
+                Balloon(L"Switch failed (check I2C/target)");
             }
             return 0;
         }
         // Direct hotkeys (mapped by label)
-        if (auto it = g_directById.find((UINT)wParam); it != g_directById.end()) {
+        auto it = g_directById.find((UINT)wParam);
+        if (it != g_directById.end()) {
             for (size_t i = 0; i < g_cfg.inputs.size(); ++i) {
                 if (g_cfg.inputs[i].label == it->second) {
                     if (SendInputCode(g_target, g_cfg.i2cSourceAddr.c_str(), g_cfg.inputs[i].code.c_str())) {
                         g_cycleIndex = (int)i;
                         Balloon(ToW(it->second).c_str());
-                    }
-                    else {
-                        Balloon(L"Switch failed (check I2C addr/target)");
+                    } else {
+                        Balloon(L"Switch failed (check I2C/target)");
                     }
                     break;
                 }
@@ -189,48 +190,62 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
     case WM_COMMAND: {
         const UINT cmd = LOWORD(wParam);
+
         if (cmd == ID_TRAY_SETTINGS) {
-            AppConfig tmp = g_cfg;
-            if (ShowSettingsDialog(hwnd, tmp)) {
-                g_cfg = tmp;
-                if (!g_cfg.targets.empty())
-                    g_target = { g_cfg.targets[0].first, g_cfg.targets[0].second };
-                UnregisterAllHotkeys(hwnd);
-                RegisterHK(hwnd);
-                Balloon(L"Settings saved");
-            }
+            // Open modeless settings dialog. Dialog itself saves and will post WM_SETTINGS_SAVED when done.
+            ShowSettingsDialog(hwnd, g_cfg);
             return 0;
         }
+
         if (cmd == ID_TRAY_CYCLE) {
             PostMessage(hwnd, WM_HOTKEY, HKID_CYCLE, 0);
             return 0;
         }
+
         if (cmd == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
             return 0;
         }
+
         // Dynamic inputs
-        if (auto mit = g_menuInputIdToIndex.find(cmd); mit != g_menuInputIdToIndex.end()) {
+        auto mit = g_menuInputIdToIndex.find(cmd);
+        if (mit != g_menuInputIdToIndex.end()) {
             size_t i = mit->second;
             if (i < g_cfg.inputs.size()) {
                 const auto& in = g_cfg.inputs[i];
                 if (SendInputCode(g_target, g_cfg.i2cSourceAddr.c_str(), in.code.c_str())) {
                     g_cycleIndex = (int)i;
                     Balloon(ToW(in.label).c_str());
-                }
-                else {
-                    Balloon(L"Switch failed (check I2C addr/target)");
+                } else {
+                    Balloon(L"Switch failed (check I2C/target)");
                 }
             }
             return 0;
         }
+
         return 0;
     }
     case WM_DESTROY:
         Shell_NotifyIcon(NIM_DELETE, &nid);
-        if (nid.hIcon) DestroyIcon(nid.hIcon); // cleanup icon handle
+        if (nid.hIcon) DestroyIcon(nid.hIcon);
         PostQuitMessage(0);
         return 0;
+
+    case WM_SETTINGS_SAVED: {
+        // Reload config from disk (settings dialog already saved)
+        AppConfig tmp;
+        if (LoadConfig(tmp)) {
+            g_cfg = tmp;
+            if (!g_cfg.targets.empty())
+                g_target = { g_cfg.targets[0].first, g_cfg.targets[0].second };
+            UnregisterAllHotkeys(hwnd);
+            RegisterHK(hwnd);
+            Balloon(L"Settings saved");
+        } else {
+            Balloon(L"Settings saved (reload failed)");
+        }
+        return 0;
+    }
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
@@ -245,7 +260,7 @@ int RunTrayApp() {
     wc.lpszClassName = kWndClass;
     wc.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON));
     wc.hIconSm = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON),
-        IMAGE_ICON, 16, 16, 0);
+                                  IMAGE_ICON, 16, 16, 0);
     RegisterClassEx(&wc);
 
     HWND hwnd = CreateWindowEx(0, kWndClass, L"", 0, 0, 0, 0, 0, nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
