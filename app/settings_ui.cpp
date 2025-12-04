@@ -44,46 +44,52 @@ static std::vector<TargetItem> g_targets;
 static void EnumerateTargets() {
     g_targets.clear();
     
-    // --- CRITICAL FIX START ---
-    // Only call InitADL if we don't have the function pointers yet.
-    // Calling it unconditionally breaks the existing context used by hotkeys.
+    // 1. Ensure ADL is initialized, but do NOT re-init if already done.
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
-        if (!InitADL()) {
-            return; // Failed to init
-        }
+        if (!InitADL()) return;
     }
-    // --- CRITICAL FIX END ---
 
+    // 2. Determine which AdapterInfo buffer to use.
+    // If the Main App already populated the global lpAdapterInfo, WE MUST USE IT.
+    // Re-fetching adapter info into a local buffer can invalidate the Main App's handles.
+    LPAdapterInfo pInfoToUse = nullptr;
+    bool usingGlobalInfo = false;
     int nAdapters = 0;
+
+    // Get the count (this is usually safe to call multiple times)
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
-    // Use LOCAL pointers to avoid stomping the global ones used by the main app
-    LPAdapterInfo localAdapterInfo = nullptr;
-    LPADLDisplayInfo localDisplayInfo = nullptr;
+    if (lpAdapterInfo != nullptr) {
+        // Reuse the global existing state
+        pInfoToUse = lpAdapterInfo;
+        usingGlobalInfo = true;
+    }
+    else {
+        // Fallback: Allocate our own local buffer only if global is missing
+        pInfoToUse = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+        if (!pInfoToUse) return;
+        memset(pInfoToUse, 0, sizeof(AdapterInfo) * nAdapters);
 
-    // Allocate memory for local adapter info
-    localAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!localAdapterInfo) return; 
-    
-    memset(localAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-    
-    // Get adapter info
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapterInfo, sizeof(AdapterInfo) * nAdapters) == 0) {
-        for (int i = 0; i < nAdapters; ++i) {
-            int displayCount = 0;
+        if (adlprocs.ADL_Adapter_AdapterInfo_Get(pInfoToUse, sizeof(AdapterInfo) * nAdapters) != 0) {
+            free(pInfoToUse);
+            return;
+        }
+    }
 
-            // Cleanup previous display info if it exists
-            if (localDisplayInfo) { 
-                ADL_Main_Memory_Free((void**)&localDisplayInfo); 
-                localDisplayInfo = nullptr; 
-            }
+    // 3. Iterate adapters and get displays
+    // Note: We ALWAYS use a local variable for DisplayInfo to avoid touching the global lpAdlDisplayInfo
+    for (int i = 0; i < nAdapters; ++i) {
+        int displayCount = 0;
+        LPADLDisplayInfo localDisplayInfo = nullptr;
 
-            // Get display info for this adapter
-            if (adlprocs.ADL_Display_DisplayInfo_Get(localAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
-                continue;
+        // Get display info for this adapter
+        // We use a local pointer 'localDisplayInfo' so we don't mess up any global display state
+        if (adlprocs.ADL_Display_DisplayInfo_Get(pInfoToUse[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
+            continue;
 
+        if (localDisplayInfo) {
             for (int j = 0; j < displayCount; ++j) {
                 const auto& di = localDisplayInfo[j];
 
@@ -93,11 +99,11 @@ static void EnumerateTargets() {
                     continue;
 
                 // Must be mapped to this adapter
-                if (localAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                if (pInfoToUse[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
                     continue;
 
                 TargetItem t;
-                t.adapterIndex = localAdapterInfo[i].iAdapterIndex;
+                t.adapterIndex = pInfoToUse[i].iAdapterIndex;
                 t.displayIndex = di.displayID.iDisplayLogicalIndex;
 
                 std::wstring dispName = ToW(std::string(di.strDisplayName));
@@ -107,17 +113,16 @@ static void EnumerateTargets() {
 
                 g_targets.push_back(t);
             }
+            // Free the display info (it was allocated by ADL for this specific call)
+            ADL_Main_Memory_Free((void**)&localDisplayInfo);
         }
     }
     
-    // Cleanup local pointers
-    if (localAdapterInfo) {
-        free(localAdapterInfo);
-        localAdapterInfo = nullptr;
-    }
-    if (localDisplayInfo) {
-        ADL_Main_Memory_Free((void**)&localDisplayInfo);
-        localDisplayInfo = nullptr;
+    // 4. Cleanup
+    // Only free pInfoToUse if we allocated it ourselves (local). 
+    // If we used the global, LEAVE IT ALONE.
+    if (!usingGlobalInfo && pInfoToUse) {
+        free(pInfoToUse);
     }
 }
 
