@@ -123,13 +123,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // --- FIX START ---
-        // Pre-scan adapters immediately on launch.
-        // This populates the list used by the Settings UI so it doesn't
-        // have to query the driver later (which breaks hotkeys).
-        RefreshTargetList();
-        // --- FIX END ---
-
         // First-run flow: LoadConfig returns false if file missing/bad
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
