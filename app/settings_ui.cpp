@@ -15,10 +15,9 @@
 // Pull in ADL types / constants / globals
 #include "../amdddc/adl.h"        
 
-extern "C" {
-    extern ADLPROCS        adlprocs;
-    extern LPAdapterInfo   lpAdapterInfo; // We READ this, but never allocate/free it here
-}
+// LINKAGE FIX: C++ linkage to match other files
+extern ADLPROCS        adlprocs;
+extern LPAdapterInfo   lpAdapterInfo; 
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -38,30 +37,26 @@ struct TargetItem {
 
 static std::vector<TargetItem> g_targets;
 
-// PASSIVE ENUMERATION:
-// We rely 100% on app_tray.cpp having already initialized ADL and populated lpAdapterInfo.
-// We do not touch the driver here to prevent breaking the hotkey state.
+// EnumerateTargets: READS GLOBAL lpAdapterInfo safely.
 static void EnumerateTargets() {
     g_targets.clear();
 
-    // If global state is missing, we can't do anything safe. 
-    // Showing a blank list is better than crashing the driver.
-    if (!lpAdapterInfo || !adlprocs.ADL_Display_DisplayInfo_Get) {
+    // Check if global state is valid
+    if (!lpAdapterInfo || !adlprocs.ADL_Adapter_NumberOfAdapters_Get || !adlprocs.ADL_Display_DisplayInfo_Get) {
         return;
     }
 
-    // We need to know how many adapters there are to iterate the array.
     int nAdapters = 0;
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
+    // READ-ONLY: Iterate global adapter list populated by app_tray
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
-        // Get display info for this adapter
-        // It is safe to query DisplayInfo (Read-Only) as long as we don't re-init the library.
+        // Get display info for this adapter (Using LOCAL variable)
         if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
             continue;
 
@@ -184,6 +179,7 @@ static void MoveSelected(HWND lb, bool up) {
     wchar_t buf[128]; 
     SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     
+    // Convert W to A for internal logic (Fix C4244)
     int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
     std::string s(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
@@ -266,8 +262,7 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
         
-        // NO INIT CALL HERE! We assume app_tray did it.
-        // Just enumerate what we have.
+        // Populate UI list from global state (passive)
         EnumerateTargets();
         
         FillFromConfig(hDlg, *s_cfg);
