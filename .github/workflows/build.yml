@@ -1,0 +1,23 @@
+name: Build LGInputSwitch
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+    - name: Build Solution
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: msbuild /m /p:Configuration=Release /p:Platform=x64 LGInputSwitch.sln
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-Build
+        path: x64/Release/*.exe
