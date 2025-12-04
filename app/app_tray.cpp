@@ -123,6 +123,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
+        // --- FIX START ---
+        // Initialize ADL and populate the Global lpAdapterInfo variable.
+        // This ensures hotkeys have the data they need immediately.
+        PreloadTargets();
+        // --- FIX END ---
+
         // First-run flow: LoadConfig returns false if file missing/bad
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
