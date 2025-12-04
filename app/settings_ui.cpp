@@ -17,10 +17,11 @@
 
 extern bool InitADL();            // from adl.cpp
 
-// NOTE: This file MUST NOT mutate global ADL pointers (lpAdapterInfo, lpAdlDisplayInfo).
-// We allocate ONLY local ADL adapter/display structures to avoid stomping global state
-// used by the main app / hotkey thread.
-
+extern "C" {
+    extern ADLPROCS        adlprocs;
+    // We bring back the Global here so we can READ it.
+    extern LPAdapterInfo   lpAdapterInfo;
+}
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -40,7 +41,7 @@ struct TargetItem {
 
 static std::vector<TargetItem> g_targets;
 
-// EnumerateTargets: use local ADL buffers only, do not touch global ADL memory.
+// EnumerateTargets: READS GLOBAL lpAdapterInfo safely.
 static void EnumerateTargets() {
     g_targets.clear();
 
@@ -53,25 +54,30 @@ static void EnumerateTargets() {
         return;
     }
 
-    // Allocate a local adapter info array
-    std::vector<AdapterInfo> localAdapters;
-    try {
-        localAdapters.resize(nAdapters);
-    } catch (...) {
-        return;
+    // CRITICAL FIX: Use the GLOBAL lpAdapterInfo if available.
+    // app_tray.cpp should have populated this at startup.
+    // If we use a local vector here, ADL internal state might mismatch.
+    LPAdapterInfo pInfoToUse = lpAdapterInfo;
+    
+    // Fallback: If global is null (weird, but possible), allocate local
+    LPAdapterInfo localAdapters = nullptr;
+    if (!pInfoToUse) {
+        localAdapters = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
+        if (!localAdapters) return;
+        memset(localAdapters, 0, sizeof(AdapterInfo) * nAdapters);
+        if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters, sizeof(AdapterInfo) * nAdapters) != 0) {
+            free(localAdapters);
+            return;
+        }
+        pInfoToUse = localAdapters;
     }
-    memset(localAdapters.data(), 0, sizeof(AdapterInfo) * nAdapters);
 
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters.data(), sizeof(AdapterInfo) * nAdapters) != 0) {
-        return;
-    }
-
-    // For each adapter, fetch display info into a local display pointer
+    // For each adapter, fetch display info into a LOCAL display pointer (Safety)
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
-        int adapterIndex = localAdapters[i].iAdapterIndex;
+        int adapterIndex = pInfoToUse[i].iAdapterIndex;
         if (adlprocs.ADL_Display_DisplayInfo_Get(adapterIndex, &displayCount, &localDisplayInfo, 0) != 0) {
             // failed for this adapter — continue
             if (localDisplayInfo) { ADL_Main_Memory_Free((void**)&localDisplayInfo); localDisplayInfo = nullptr; }
@@ -88,7 +94,7 @@ static void EnumerateTargets() {
             if ((di.iDisplayInfoValue & required) != required)
                 continue;
 
-            // Ensure the display is mapped to this adapter (compare fields from localAdapters)
+            // Ensure the display is mapped to this adapter
             if (adapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
                 continue;
 
@@ -106,6 +112,11 @@ static void EnumerateTargets() {
 
         // Free the local display info allocated by ADL
         ADL_Main_Memory_Free((void**)&localDisplayInfo);
+    }
+    
+    // Cleanup local fallback if we used it
+    if (localAdapters) {
+        free(localAdapters);
     }
 }
 
