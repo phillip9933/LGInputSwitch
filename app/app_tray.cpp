@@ -6,22 +6,12 @@
 #include "settings_ui.h"
 #include "welcome_ui.h"
 #include "../resource/resource.h"
-
 #include <windows.h>
 #include <shellapi.h>
 #include <vector>
 #include <map>
 #include <chrono>
 #include <set>
-
-// --- ADDED FOR ADL INIT ---
-#include "../amdddc/adl.h"
-extern bool InitADL();
-extern "C" {
-    extern ADLPROCS      adlprocs;
-    extern LPAdapterInfo lpAdapterInfo; // We will populate this GLOBAL here
-}
-// --------------------------
 
 static const wchar_t* kWndClass = L"LGInputSwitchHiddenWnd";
 static UINT HKID_CYCLE = 1;
@@ -37,34 +27,7 @@ static Target g_target;
 static const UINT ID_INPUT_BASE = 41000;
 static std::map<UINT, size_t> g_menuInputIdToIndex; // menu id -> index into g_cfg.inputs
 
-// Message posted by settings dialog when user saves
 static const UINT WM_SETTINGS_SAVED = WM_APP + 2;
-
-// --- HELPER TO PRELOAD ADL ---
-static void PreloadADL() {
-    // 1. Init Library
-    if (!InitADL()) return;
-
-    // 2. Get Count
-    int nAdapters = 0;
-    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
-        return;
-    }
-
-    // 3. Allocate GLOBAL lpAdapterInfo if not exists
-    if (!lpAdapterInfo) {
-        lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-        if (lpAdapterInfo) {
-            memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-            // Populate it. This data stays alive for the whole app.
-            if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) != 0) {
-                free(lpAdapterInfo);
-                lpAdapterInfo = nullptr;
-            }
-        }
-    }
-}
-// -----------------------------
 
 static void UnregisterAllHotkeys(HWND hwnd) {
     UnregisterHotKey(hwnd, HKID_CYCLE);
@@ -122,14 +85,12 @@ static void RegisterHK(HWND hwnd) {
 }
 
 static std::vector<InputDef> OrderedInputs() {
-    // Build map of enabled inputs
     std::map<std::string, const InputDef*> enabled;
     for (auto& in : g_cfg.inputs) enabled[in.label] = &in;
 
     std::vector<InputDef> out;
     std::set<std::string> used;
 
-    // 1) take items from cycleOrder that are enabled
     for (auto& name : g_cfg.cycleOrder) {
         auto it = enabled.find(name);
         if (it != enabled.end()) {
@@ -137,11 +98,9 @@ static std::vector<InputDef> OrderedInputs() {
             used.insert(name);
         }
     }
-    // 2) append remaining enabled inputs
     for (auto& kv : enabled) {
         if (!used.count(kv.first)) out.push_back(*kv.second);
     }
-    // fallback
     if (out.empty()) {
         for (auto& in : g_cfg.inputs) out.push_back(in);
     }
@@ -151,25 +110,22 @@ static std::vector<InputDef> OrderedInputs() {
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE: {
-        // Tray icon (custom)
         nid.cbSize = sizeof(nid);
         nid.hWnd = hwnd;
         nid.uID = 1;
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         nid.uCallbackMessage = WM_APP + 1;
         nid.hIcon = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON),
-                                     IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
+            IMAGE_ICON, 0, 0, LR_DEFAULTSIZE);
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // --- PRELOAD ADL HERE ---
-        PreloadADL();
-        // ------------------------
+        // --- FIX: INITIALIZE SYSTEM ONCE HERE ---
+        InitializeSystem();
+        // ----------------------------------------
 
-        // First-run flow: LoadConfig returns false if file missing/bad
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
-            // First-run: show Welcome (modal) and then settings (modal) so user configures before hotkeys
             if (!ShowWelcomeDialog(hwnd) || !ShowSettingsDialogModal(hwnd, g_cfg)) {
                 DestroyWindow(hwnd);
                 return 0;
@@ -199,7 +155,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
-        // Direct hotkeys (mapped by label)
         auto it = g_directById.find((UINT)wParam);
         if (it != g_directById.end()) {
             for (size_t i = 0; i < g_cfg.inputs.size(); ++i) {
@@ -229,24 +184,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     }
     case WM_COMMAND: {
         const UINT cmd = LOWORD(wParam);
-
         if (cmd == ID_TRAY_SETTINGS) {
-            // Open modeless settings dialog. Dialog itself saves and will post WM_SETTINGS_SAVED when done.
             ShowSettingsDialog(hwnd, g_cfg);
             return 0;
         }
-
         if (cmd == ID_TRAY_CYCLE) {
             PostMessage(hwnd, WM_HOTKEY, HKID_CYCLE, 0);
             return 0;
         }
-
         if (cmd == ID_TRAY_EXIT) {
             DestroyWindow(hwnd);
             return 0;
         }
-
-        // Dynamic inputs
         auto mit = g_menuInputIdToIndex.find(cmd);
         if (mit != g_menuInputIdToIndex.end()) {
             size_t i = mit->second;
@@ -261,7 +210,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
-
         return 0;
     }
     case WM_DESTROY:
@@ -271,7 +219,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         return 0;
 
     case WM_SETTINGS_SAVED: {
-        // Reload config from disk (settings dialog already saved)
         AppConfig tmp;
         if (LoadConfig(tmp)) {
             g_cfg = tmp;
@@ -290,7 +237,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 }
 
 int RunTrayApp() {
-    // Use WNDCLASSEX so we can set a small icon too
     WNDCLASSEX wc{};
     wc.cbSize = sizeof(wc);
     wc.style = 0;
@@ -299,7 +245,7 @@ int RunTrayApp() {
     wc.lpszClassName = kWndClass;
     wc.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON));
     wc.hIconSm = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APPICON),
-                                  IMAGE_ICON, 16, 16, 0);
+        IMAGE_ICON, 16, 16, 0);
     RegisterClassEx(&wc);
 
     HWND hwnd = CreateWindowEx(0, kWndClass, L"", 0, 0, 0, 0, 0, nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
