@@ -10,14 +10,17 @@
 #include <algorithm>
 #include <sstream>
 #include <set>
-#include <stdio.h> 
+#include <stdio.h> // for swprintf
 
 // Pull in ADL types / constants / globals
-#include "../amdddc/adl.h"        
+#include "../amdddc/adl.h"        // has ADLPROCS, AdapterInfo, ADL_DISPLAY_* flags
 
-// LINKAGE FIX: C++ linkage to match other files
-extern ADLPROCS        adlprocs;
-extern LPAdapterInfo   lpAdapterInfo; 
+extern bool InitADL();            // from adl.cpp
+
+// NOTE: This file MUST NOT mutate global ADL pointers (lpAdapterInfo, lpAdlDisplayInfo).
+// We allocate ONLY local ADL adapter/display structures to avoid stomping global state
+// used by the main app / hotkey thread.
+
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -32,58 +35,77 @@ static inline void UnpackAD(LPARAM v, int& adapter, int& display) {
 struct TargetItem {
     int adapterIndex{};
     int displayIndex{};
-    std::wstring label; 
+    std::wstring label; // e.g., "Adapter 5 - LG ULTRAGEAR+ (Display 0)"
 };
 
 static std::vector<TargetItem> g_targets;
 
-// EnumerateTargets: READS GLOBAL lpAdapterInfo safely.
+// EnumerateTargets: use local ADL buffers only, do not touch global ADL memory.
 static void EnumerateTargets() {
     g_targets.clear();
 
-    // Check if global state is valid
-    if (!lpAdapterInfo || !adlprocs.ADL_Adapter_NumberOfAdapters_Get || !adlprocs.ADL_Display_DisplayInfo_Get) {
-        return;
-    }
+    // Ensure ADL initialized (safe to call multiple times)
+    if (!InitADL()) return;
 
+    // Get number of adapters
     int nAdapters = 0;
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
-    // READ-ONLY: Iterate global adapter list populated by app_tray
+    // Allocate a local adapter info array
+    std::vector<AdapterInfo> localAdapters;
+    try {
+        localAdapters.resize(nAdapters);
+    } catch (...) {
+        return;
+    }
+    memset(localAdapters.data(), 0, sizeof(AdapterInfo) * nAdapters);
+
+    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters.data(), sizeof(AdapterInfo) * nAdapters) != 0) {
+        return;
+    }
+
+    // For each adapter, fetch display info into a local display pointer
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
-        // Get display info for this adapter (Using LOCAL variable)
-        if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
+        int adapterIndex = localAdapters[i].iAdapterIndex;
+        if (adlprocs.ADL_Display_DisplayInfo_Get(adapterIndex, &displayCount, &localDisplayInfo, 0) != 0) {
+            // failed for this adapter — continue
+            if (localDisplayInfo) { ADL_Main_Memory_Free((void**)&localDisplayInfo); localDisplayInfo = nullptr; }
             continue;
-
-        if (localDisplayInfo) {
-            for (int j = 0; j < displayCount; ++j) {
-                const auto& di = localDisplayInfo[j];
-
-                const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
-                if ((di.iDisplayInfoValue & required) != required)
-                    continue;
-
-                if (lpAdapterInfo[i].iAdapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
-                    continue;
-
-                TargetItem t;
-                t.adapterIndex = lpAdapterInfo[i].iAdapterIndex;
-                t.displayIndex = di.displayID.iDisplayLogicalIndex;
-
-                std::wstring dispName = ToW(std::string(di.strDisplayName));
-                std::wstringstream ss;
-                ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
-                t.label = ss.str();
-
-                g_targets.push_back(t);
-            }
-            ADL_Main_Memory_Free((void**)&localDisplayInfo);
         }
+
+        if (!localDisplayInfo) continue;
+
+        for (int j = 0; j < displayCount; ++j) {
+            const auto& di = localDisplayInfo[j];
+
+            // Need both CONNECTED and MAPPED flags
+            const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+            if ((di.iDisplayInfoValue & required) != required)
+                continue;
+
+            // Ensure the display is mapped to this adapter (compare fields from localAdapters)
+            if (adapterIndex != di.displayID.iDisplayLogicalAdapterIndex)
+                continue;
+
+            TargetItem t;
+            t.adapterIndex = adapterIndex;
+            t.displayIndex = di.displayID.iDisplayLogicalIndex;
+
+            std::wstring dispName = ToW(std::string(di.strDisplayName));
+            std::wstringstream ss;
+            ss << L"Adapter " << t.adapterIndex << L" - " << dispName << L" (Display " << t.displayIndex << L")";
+            t.label = ss.str();
+
+            g_targets.push_back(t);
+        }
+
+        // Free the local display info allocated by ADL
+        ADL_Main_Memory_Free((void**)&localDisplayInfo);
     }
 }
 
@@ -116,18 +138,18 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
 
     // Hotkeys
     SetWindowTextA(GetDlgItem(hDlg, IDC_HOTKEY_CYCLE), cfg.hotkeys.cycle.c_str());
-    
+
     auto setHK = [&](int id, const char* label) {
         auto it = cfg.hotkeys.direct.find(label);
         SetWindowTextA(GetDlgItem(hDlg, id), it == cfg.hotkeys.direct.end() ? "" : it->second.c_str());
     };
-    
+
     setHK(IDC_HK_DP, "DisplayPort");
     setHK(IDC_HK_USBC, "USB-C");
     setHK(IDC_HK_HDMI1, "HDMI1");
     setHK(IDC_HK_HDMI2, "HDMI2");
 
-    // Cycle order list
+    // Cycle order list: merge cycleOrder with currently enabled inputs
     HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
     SendMessage(lb, LB_RESETCONTENT, 0, 0);
 
@@ -152,11 +174,11 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     }
     SendMessage(lb, LB_SETCURSEL, 0, 0);
 
-    // I2C addr
+    // I2C addr (show value or default 0x50)
     std::wstring wI2C = ToW(cfg.i2cSourceAddr.empty() ? std::string("0x50") : cfg.i2cSourceAddr);
     SetDlgItemTextW(hDlg, IDC_I2C_ADDR, wI2C.c_str());
 
-    // Debounce
+    // Debounce (show value or default 750)
     int dbVal = (cfg.debounceMs > 0 ? cfg.debounceMs : 750);
     wchar_t bufDB[32];
     _snwprintf_s(bufDB, _TRUNCATE, L"%d", dbVal);
@@ -176,14 +198,7 @@ static void MoveSelected(HWND lb, bool up) {
     int tgt = up ? sel - 1 : sel + 1;
     if (tgt < 0 || tgt >= count) return;
 
-    wchar_t buf[128]; 
-    SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
-    
-    // Convert W to A for internal logic (Fix C4244)
-    int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
-    std::string s(len > 0 ? len - 1 : 0, '\0');
-    if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
-    
+    wchar_t buf[128]; SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     SendMessage(lb, LB_DELETESTRING, sel, 0);
     SendMessage(lb, LB_INSERTSTRING, tgt, (LPARAM)buf);
     SendMessage(lb, LB_SETCURSEL, tgt, 0);
@@ -192,11 +207,11 @@ static void MoveSelected(HWND lb, bool up) {
 static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     // Monitor selection
     HWND cb = GetDlgItem(hDlg, IDC_MONITOR);
-    
+
     if (!g_targets.empty()) {
         int idx = (int)SendMessage(cb, CB_GETCURSEL, 0, 0);
         if (idx == CB_ERR) idx = 0;
-        
+
         LPARAM data = SendMessage(cb, CB_GETITEMDATA, idx, 0);
         int adapter = 0, display = 0; UnpackAD(data, adapter, display);
         io.targets = { {adapter, display} };
@@ -227,21 +242,17 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     std::set<std::string> enabledLabels;
     for (auto& in : io.inputs) enabledLabels.insert(in.label);
 
-    // Cycle order
+    // Cycle order (only keep enabled items)
     HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
     int count = (int)SendMessage(lb, LB_GETCOUNT, 0, 0);
     io.cycleOrder.clear();
     for (int i = 0; i < count; ++i) {
-        wchar_t w[128]; 
-        SendMessage(lb, LB_GETTEXT, i, (LPARAM)w);
-        
-        int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-        std::string s(len > 0 ? len - 1 : 0, '\0');
-        if (len > 0) WideCharToMultiByte(CP_UTF8, 0, w, -1, &s[0], len, nullptr, nullptr);
-        
+        wchar_t w[128]; SendMessage(lb, LB_GETTEXT, i, (LPARAM)w);
+        std::string s(w, w + wcslen(w));
         if (enabledLabels.count(s)) io.cycleOrder.push_back(s);
     }
     if (io.cycleOrder.empty()) {
+        // default to all checked inputs, in the order they appear in `io.inputs`
         for (auto& in : io.inputs) io.cycleOrder.push_back(in.label);
     }
 
@@ -255,19 +266,22 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     return true;
 }
 
+// forward-declare wrapper procedures so we can create modal & modeless variations
+static INT_PTR CALLBACK DlgProcModal(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+static INT_PTR CALLBACK DlgProcModeless(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Common handler used by modal+modeless wrappers
 static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, bool modal) {
     static AppConfig* s_cfg = nullptr;
 
     switch (msg) {
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
-        
-        // Populate UI list from global state (passive)
+        // Enumerate current targets (local-only)
         EnumerateTargets();
-        
         FillFromConfig(hDlg, *s_cfg);
 
-        // Seed order list 
+        // Seed order list with currently checked inputs if empty
         HWND lb = GetDlgItem(hDlg, IDC_ORDER_LIST);
         if (SendMessage(lb, LB_GETCOUNT, 0, 0) == 0) {
             if (IsDlgButtonChecked(hDlg, IDC_INPUT_DP) == BST_CHECKED)    SendMessage(lb, LB_ADDSTRING, 0, (LPARAM)L"DisplayPort");
@@ -286,13 +300,20 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
                 MessageBox(hDlg, L"Select at least one input.", L"LG Input Switch", MB_OK | MB_ICONWARNING);
                 return TRUE;
             }
+            // Save config to disk
             SaveConfig(*s_cfg);
-            
-            HWND parent = GetParent(hDlg);
-            if (parent) PostMessage(parent, WM_APP + 2, 0, 0);
 
-            if (modal) EndDialog(hDlg, IDOK);
-            else DestroyWindow(hDlg);
+            // Notify main window that settings were saved
+            HWND parent = GetParent(hDlg);
+            if (parent) {
+                PostMessage(parent, WM_APP + 2, 0, 0);
+            }
+
+            if (modal) {
+                EndDialog(hDlg, IDOK);
+            } else {
+                DestroyWindow(hDlg);
+            }
             return TRUE;
         }
         case IDC_CANCEL:
@@ -313,6 +334,7 @@ static INT_PTR CALLBACK DlgProcModeless(HWND hDlg, UINT msg, WPARAM wParam, LPAR
     return DlgProcCommon(hDlg, msg, wParam, lParam, false);
 }
 
+// Show modeless (returns immediately). Dialog will POST WM_APP+2 to parent when saved.
 bool ShowSettingsDialog(HWND parent, AppConfig& ioCfg) {
     HWND dlg = CreateDialogParam(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDD_SETTINGS), parent, DlgProcModeless, (LPARAM)&ioCfg);
     if (!dlg) return false;
@@ -320,6 +342,7 @@ bool ShowSettingsDialog(HWND parent, AppConfig& ioCfg) {
     return true;
 }
 
+// Show modal — used at first-run (blocks until user saves or cancels)
 bool ShowSettingsDialogModal(HWND parent, AppConfig& ioCfg) {
     INT_PTR r = DialogBoxParam(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDD_SETTINGS), parent, DlgProcModal, (LPARAM)&ioCfg);
     return r == IDOK;
