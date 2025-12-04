@@ -15,14 +15,10 @@
 // Pull in ADL types / constants / globals
 #include "../amdddc/adl.h"        
 
-extern bool InitADL();            
-
-// --- FIX: NO extern "C" ---
-// We link to the standard C++ globals defined in adl.cpp.
-// This ensures app_toggle.cpp (Hotkeys) and this file see the SAME memory.
-extern ADLPROCS        adlprocs;
-extern LPAdapterInfo   lpAdapterInfo;
-// --------------------------
+extern "C" {
+    extern ADLPROCS        adlprocs;
+    extern LPAdapterInfo   lpAdapterInfo; // We READ this, but never allocate/free it here
+}
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -40,51 +36,32 @@ struct TargetItem {
     std::wstring label; 
 };
 
-// The UI Cache
 static std::vector<TargetItem> g_targets;
 
-// --- SINGLE INITIALIZATION POINT ---
-void InitializeSystem() {
-    static bool s_initialized = false;
-    
-    // Safety check: run once.
-    if (s_initialized) return;
+// PASSIVE ENUMERATION:
+// We rely 100% on app_tray.cpp having already initialized ADL and populated lpAdapterInfo.
+// We do not touch the driver here to prevent breaking the hotkey state.
+static void EnumerateTargets() {
+    g_targets.clear();
 
-    // 1. Init ADL Library
-    if (!InitADL()) return;
+    // If global state is missing, we can't do anything safe. 
+    // Showing a blank list is better than crashing the driver.
+    if (!lpAdapterInfo || !adlprocs.ADL_Display_DisplayInfo_Get) {
+        return;
+    }
 
-    // 2. Get Adapter Count
+    // We need to know how many adapters there are to iterate the array.
     int nAdapters = 0;
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
-    // 3. Allocate GLOBAL Memory for Hotkeys
-    // We explicitly manage the global pointer shared by the whole app.
-    if (lpAdapterInfo) {
-        free(lpAdapterInfo);
-        lpAdapterInfo = nullptr;
-    }
-
-    lpAdapterInfo = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
-    if (!lpAdapterInfo) return;
-
-    memset(lpAdapterInfo, 0, sizeof(AdapterInfo) * nAdapters);
-
-    // 4. Populate Global Memory
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(lpAdapterInfo, sizeof(AdapterInfo) * nAdapters) != 0) {
-        free(lpAdapterInfo);
-        lpAdapterInfo = nullptr;
-        return;
-    }
-
-    // 5. Populate UI List (g_targets)
-    g_targets.clear();
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
         // Get display info for this adapter
+        // It is safe to query DisplayInfo (Read-Only) as long as we don't re-init the library.
         if (adlprocs.ADL_Display_DisplayInfo_Get(lpAdapterInfo[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
             continue;
 
@@ -113,9 +90,6 @@ void InitializeSystem() {
             ADL_Main_Memory_Free((void**)&localDisplayInfo);
         }
     }
-
-    // Mark as done.
-    s_initialized = true;
 }
 
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
@@ -210,7 +184,6 @@ static void MoveSelected(HWND lb, bool up) {
     wchar_t buf[128]; 
     SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     
-    // Convert W to A for internal logic
     int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
     std::string s(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
@@ -293,8 +266,9 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
         
-        // Ensure system initialized (this call populates global lpAdapterInfo)
-        InitializeSystem();
+        // NO INIT CALL HERE! We assume app_tray did it.
+        // Just enumerate what we have.
+        EnumerateTargets();
         
         FillFromConfig(hDlg, *s_cfg);
 
