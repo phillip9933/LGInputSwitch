@@ -17,10 +17,13 @@
 
 extern bool InitADL();            
 
-// --- FIX: REMOVED extern "C" ---
-// This ensures we link to the same C++ globals defined in adl.cpp
-extern ADLPROCS        adlprocs;
-extern LPAdapterInfo   lpAdapterInfo;
+// --- FIX: RESTORE extern "C" ---
+// This forces us to link to the C-style globals defined in adl.cpp.
+// Without this, we create shadow C++ variables that app_toggle.cpp can't see.
+extern "C" {
+    extern ADLPROCS        adlprocs;
+    extern LPAdapterInfo   lpAdapterInfo;
+}
 // -------------------------------
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
@@ -45,6 +48,8 @@ static std::vector<TargetItem> g_targets;
 // --- SINGLE INITIALIZATION POINT ---
 void InitializeSystem() {
     static bool s_initialized = false;
+    
+    // Safety check: run once.
     if (s_initialized) return;
 
     // 1. Init ADL Library
@@ -57,6 +62,7 @@ void InitializeSystem() {
     }
 
     // 3. Allocate GLOBAL Memory for Hotkeys
+    // We explicitly manage the global pointer shared by the whole app.
     if (lpAdapterInfo) {
         free(lpAdapterInfo);
         lpAdapterInfo = nullptr;
@@ -88,7 +94,6 @@ void InitializeSystem() {
             for (int j = 0; j < displayCount; ++j) {
                 const auto& di = localDisplayInfo[j];
 
-                // Filter for valid displays
                 const int required = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
                 if ((di.iDisplayInfoValue & required) != required)
                     continue;
@@ -207,7 +212,6 @@ static void MoveSelected(HWND lb, bool up) {
     wchar_t buf[128]; 
     SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     
-    // Convert W to A for internal logic
     int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
     std::string s(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
@@ -290,7 +294,7 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
         
-        // Ensure system initialized (global state + UI targets)
+        // Ensure system initialized (this call populates global lpAdapterInfo)
         InitializeSystem();
         
         FillFromConfig(hDlg, *s_cfg);
