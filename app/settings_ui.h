@@ -2,9 +2,8 @@
 #include <windows.h>
 #include "app_config.h"
 
-// Initialize ADL and populate global state ONCE.
-void InitializeSystem();
-
-// Dialog functions
+// Open the Settings dialog (Modeless for tray)
 bool ShowSettingsDialog(HWND parent, AppConfig& ioCfg);
+
+// Open the Settings dialog (Modal for first-run)
 bool ShowSettingsDialogModal(HWND parent, AppConfig& ioCfg);
