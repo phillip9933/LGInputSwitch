@@ -42,50 +42,52 @@ struct TargetItem {
 static std::vector<TargetItem> g_targets;
 
 static void EnumerateTargets() {
-    g_targets.clear();
+    // 1. CACHE CHECK: If we already found targets, DO NOT touch ADL again.
+    // This prevents the Settings UI from repeatedly poking the driver and risking a reset.
+    if (!g_targets.empty()) {
+        return;
+    }
     
-    // 1. Ensure ADL is initialized, but do NOT re-init if already done.
+    // 2. Ensure ADL is initialized, but be gentle.
     if (!adlprocs.ADL_Adapter_NumberOfAdapters_Get) {
         if (!InitADL()) return;
     }
 
-    // 2. Determine which AdapterInfo buffer to use.
-    // If the Main App already populated the global lpAdapterInfo, WE MUST USE IT.
-    // Re-fetching adapter info into a local buffer can invalidate the Main App's handles.
-    LPAdapterInfo pInfoToUse = nullptr;
-    bool usingGlobalInfo = false;
     int nAdapters = 0;
-
-    // Get the count (this is usually safe to call multiple times)
     if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
+    // 3. Determine if we can reuse the global state (PREFFERED) or need a local buffer.
+    LPAdapterInfo pInfoToUse = nullptr;
+    bool usingGlobalInfo = false;
+
     if (lpAdapterInfo != nullptr) {
-        // Reuse the global existing state
+        // The Main App has already populated this. USE IT AS IS.
+        // DO NOT call ADL_Adapter_AdapterInfo_Get again, as it might reset the context.
         pInfoToUse = lpAdapterInfo;
         usingGlobalInfo = true;
     }
     else {
-        // Fallback: Allocate our own local buffer only if global is missing
+        // Fallback: Allocate local buffer only if global is missing (Startup scenario?)
         pInfoToUse = (LPAdapterInfo)malloc(sizeof(AdapterInfo) * nAdapters);
         if (!pInfoToUse) return;
         memset(pInfoToUse, 0, sizeof(AdapterInfo) * nAdapters);
 
+        // Only call Get if we are using our own local buffer
         if (adlprocs.ADL_Adapter_AdapterInfo_Get(pInfoToUse, sizeof(AdapterInfo) * nAdapters) != 0) {
             free(pInfoToUse);
             return;
         }
     }
 
-    // 3. Iterate adapters and get displays
-    // Note: We ALWAYS use a local variable for DisplayInfo to avoid touching the global lpAdlDisplayInfo
+    // 4. Iterate and Get Display Info
+    // We use a LOCAL variable for DisplayInfo to ensure we don't stomp the global lpAdlDisplayInfo
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
         // Get display info for this adapter
-        // We use a local pointer 'localDisplayInfo' so we don't mess up any global display state
         if (adlprocs.ADL_Display_DisplayInfo_Get(pInfoToUse[i].iAdapterIndex, &displayCount, &localDisplayInfo, 0) != 0)
             continue;
 
@@ -118,9 +120,8 @@ static void EnumerateTargets() {
         }
     }
     
-    // 4. Cleanup
-    // Only free pInfoToUse if we allocated it ourselves (local). 
-    // If we used the global, LEAVE IT ALONE.
+    // 5. Cleanup
+    // Only free pInfoToUse if we allocated it ourselves. If it's global, LEAVE IT ALONE.
     if (!usingGlobalInfo && pInfoToUse) {
         free(pInfoToUse);
     }
