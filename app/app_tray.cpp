@@ -16,11 +16,11 @@
 
 // --- ADL GLOBALS ---
 #include "../amdddc/adl.h"
+
+// LINKAGE FIX: Use C++ linkage (no extern "C") to match other files
 extern bool InitADL();
-extern "C" {
-    extern ADLPROCS      adlprocs;
-    extern LPAdapterInfo lpAdapterInfo; // POPULATE THIS HERE
-}
+extern ADLPROCS      adlprocs;
+extern LPAdapterInfo lpAdapterInfo; 
 // -------------------
 
 static const wchar_t* kWndClass = L"LGInputSwitchHiddenWnd";
@@ -34,10 +34,10 @@ static AppConfig g_cfg;
 static Target g_target;
 
 static const UINT ID_INPUT_BASE = 41000;
-static std::map<UINT, size_t> g_menuInputIdToIndex;
+static std::map<UINT, size_t> g_menuInputIdToIndex; 
 static const UINT WM_SETTINGS_SAVED = WM_APP + 2;
 
-// --- INIT HELPER (LOCAL) ---
+// --- INIT HELPER ---
 static void InitADLAndState() {
     // 1. Init Library
     if (!InitADL()) return;
@@ -61,7 +61,7 @@ static void InitADLAndState() {
         }
     }
 }
-// ---------------------------
+// -------------------
 
 static void UnregisterAllHotkeys(HWND hwnd) {
     UnregisterHotKey(hwnd, HKID_CYCLE);
@@ -141,9 +141,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         wcscpy_s(nid.szTip, L"LGInputSwitch");
         Shell_NotifyIcon(NIM_ADD, &nid);
 
-        // --- INIT ADL HERE ---
+        // --- INIT GLOBAL ADL STATE ---
         InitADLAndState();
-        // ---------------------
+        // -----------------------------
 
         bool loaded = LoadConfig(g_cfg);
         if (!loaded) {
