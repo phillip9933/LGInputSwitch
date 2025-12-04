@@ -17,11 +17,11 @@
 
 extern bool InitADL();            
 
-extern "C" {
-    extern ADLPROCS        adlprocs;
-    // We use the Global lpAdapterInfo so hotkeys work
-    extern LPAdapterInfo   lpAdapterInfo;
-}
+// --- FIX: REMOVED extern "C" ---
+// This ensures we link to the same C++ globals defined in adl.cpp
+extern ADLPROCS        adlprocs;
+extern LPAdapterInfo   lpAdapterInfo;
+// -------------------------------
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
 static inline LPARAM PackAD(int adapter, int display) {
@@ -42,12 +42,9 @@ struct TargetItem {
 // The UI Cache
 static std::vector<TargetItem> g_targets;
 
-// --- THE FIX: SINGLE INITIALIZATION POINT ---
+// --- SINGLE INITIALIZATION POINT ---
 void InitializeSystem() {
     static bool s_initialized = false;
-    
-    // If we have already run, DO NOT RUN AGAIN.
-    // Rerunning ADL queries destroys the state needed for hotkeys.
     if (s_initialized) return;
 
     // 1. Init ADL Library
@@ -60,9 +57,8 @@ void InitializeSystem() {
     }
 
     // 3. Allocate GLOBAL Memory for Hotkeys
-    // We strictly use the global 'lpAdapterInfo' so the rest of the app can see it.
     if (lpAdapterInfo) {
-        free(lpAdapterInfo); // Safety cleanup if re-entering (shouldn't happen due to s_initialized)
+        free(lpAdapterInfo);
         lpAdapterInfo = nullptr;
     }
 
@@ -79,7 +75,6 @@ void InitializeSystem() {
     }
 
     // 5. Populate UI List (g_targets)
-    // We read from the Global Memory we just created.
     g_targets.clear();
     for (int i = 0; i < nAdapters; ++i) {
         int displayCount = 0;
@@ -116,10 +111,9 @@ void InitializeSystem() {
         }
     }
 
-    // Mark as done. We will never touch ADL again this session.
+    // Mark as done.
     s_initialized = true;
 }
-// --------------------------------------------
 
 static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     // Monitor combo
@@ -213,7 +207,7 @@ static void MoveSelected(HWND lb, bool up) {
     wchar_t buf[128]; 
     SendMessage(lb, LB_GETTEXT, sel, (LPARAM)buf);
     
-    // Safety for C4244 warning
+    // Convert W to A for internal logic
     int len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
     std::string s(len > 0 ? len - 1 : 0, '\0');
     if (len > 0) WideCharToMultiByte(CP_UTF8, 0, buf, -1, &s[0], len, nullptr, nullptr);
@@ -289,7 +283,6 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     return true;
 }
 
-// Common handler
 static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, bool modal) {
     static AppConfig* s_cfg = nullptr;
 
@@ -297,7 +290,7 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
     case WM_INITDIALOG: {
         s_cfg = reinterpret_cast<AppConfig*>(lParam);
         
-        // Ensure system initialized (this will return immediately if already done)
+        // Ensure system initialized (global state + UI targets)
         InitializeSystem();
         
         FillFromConfig(hDlg, *s_cfg);
@@ -323,7 +316,6 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
             }
             SaveConfig(*s_cfg);
             
-            // Notify parent
             HWND parent = GetParent(hDlg);
             if (parent) PostMessage(parent, WM_APP + 2, 0, 0);
 
