@@ -1,0 +1,10 @@
+{
+  "blank_issues_enabled": false,
+  "contact_links": [
+    {
+      "name": "Private security report",
+      "url": "https://github.com/phillip9933/LGInputSwitch/security/advisories/new",
+      "about": "Report suspected vulnerabilities privately; do not post exploit details or secrets in public issues."
+    }
+  ]
+}

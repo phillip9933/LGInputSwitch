@@ -1,0 +1,81 @@
+{
+  "name": "Maintenance task",
+  "description": "Track dependencies, CI, refactoring, performance or technical debt.",
+  "labels": [
+    "type:maintenance"
+  ],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Use synthetic or redacted examples. Report suspected security vulnerabilities privately through the repository\u2019s Security page, not this public form. Project Status and release Stage are maintained separately from labels."
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "goal",
+      "attributes": {
+        "label": "Goal or problem",
+        "description": "For a bug, include expected and actual behavior and reproduction steps."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "scope",
+      "attributes": {
+        "label": "Scope and exclusions",
+        "description": "State what is included and explicitly outside this issue."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "environment",
+      "attributes": {
+        "label": "Environment / context",
+        "description": "Include relevant app/SDK version, OS, device/hardware or document location. No private data."
+      },
+      "validations": {
+        "required": false
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "acceptance",
+      "attributes": {
+        "label": "Done when",
+        "value": "- [ ] Acceptance criteria are defined and implemented.\n- [ ] Relevant checks pass and evidence is linked.\n- [ ] Documentation and known limitations match the result."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "dependencies",
+      "attributes": {
+        "label": "Dependencies",
+        "value": "None known; maintainer to confirm."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "verification",
+      "attributes": {
+        "label": "Verification results or links",
+        "value": "Pending \u2014 record the exact revision, checks run, outcomes and limitations before closing."
+      },
+      "validations": {
+        "required": true
+      }
+    }
+  ]
+}

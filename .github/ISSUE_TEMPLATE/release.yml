@@ -1,0 +1,146 @@
+{
+  "name": "Release tracker",
+  "description": "Define one release owner, intended scope and promotion evidence.",
+  "labels": [
+    "type:release"
+  ],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Use synthetic or redacted examples. Report suspected security vulnerabilities privately through the repository\u2019s Security page, not this public form. Project Status and release Stage are maintained separately from labels."
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "goal",
+      "attributes": {
+        "label": "Goal or problem",
+        "description": "For a bug, include expected and actual behavior and reproduction steps."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "scope",
+      "attributes": {
+        "label": "Scope and exclusions",
+        "description": "State what is included and explicitly outside this issue."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "target",
+      "attributes": {
+        "label": "Target stable version",
+        "description": "Use the intended stable version. If still undecided, say TBD and do not assign a milestone yet."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "owner",
+      "attributes": {
+        "label": "Release owner",
+        "description": "Name exactly one responsible maintainer."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "platforms",
+      "attributes": {
+        "label": "Supported platforms"
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "included",
+      "attributes": {
+        "label": "Included work",
+        "description": "Link issues and dependencies; link other repository milestones for a coordinated release."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "gates",
+      "attributes": {
+        "label": "Release promotion gates",
+        "value": "- [ ] Planned \u2192 Alpha: scope, acceptance criteria and supported platforms recorded; installable build or consumable SDK/test host exists.\n- [ ] Alpha \u2192 Beta: intended features implemented; core workflows pass; limitations documented.\n- [ ] Beta \u2192 RC: release blockers resolved; regression, upgrade/migration and data-safety checks pass; scope frozen.\n- [ ] RC \u2192 Stable: final candidate validated; notes/limitations ready; signing/checksums verified where applicable; release published.\n\nFor wallet/cloud changes cover relevant encryption, storage, backup/restore and sync behavior. Return RC to Beta if new feature scope enters."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "blockers",
+      "attributes": {
+        "label": "Remaining release blockers",
+        "value": "List open blockers and the evidence or dependency that removes each."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "builds",
+      "attributes": {
+        "label": "Build and release links",
+        "value": "Pending. Link the exact tested revision, candidate artifacts and final release when available."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "acceptance",
+      "attributes": {
+        "label": "Done when",
+        "value": "- [ ] Acceptance criteria are defined and implemented.\n- [ ] Relevant checks pass and evidence is linked.\n- [ ] Documentation and known limitations match the result."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "dependencies",
+      "attributes": {
+        "label": "Dependencies",
+        "value": "None known; maintainer to confirm."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "verification",
+      "attributes": {
+        "label": "Verification results or links",
+        "value": "Pending \u2014 record the exact revision, checks run, outcomes and limitations before closing."
+      },
+      "validations": {
+        "required": true
+      }
+    }
+  ]
+}

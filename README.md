@@ -1,5 +1,11 @@
 # LG Input Switch (Windows Tray)
 
+## Roadmap and work
+
+[Release roadmap](https://github.com/users/phillip9933/projects/2/views/2) · [Work board](https://github.com/users/phillip9933/projects/2/views/1) · [Issue conventions](CONTRIBUTING.md#public-roadmap-and-issue-management)
+
+Follow release scope and maturity separately from individual work. Dates are estimates; unscheduled ideas have no release milestone.
+
 A small Windows tray utility that switches **LG monitor inputs** (DisplayPort / USB-C / HDMI1 / HDMI2) on **AMD GPUs** using **DDC/CI over I²C**, with configurable hotkeys, a settings dialog, first-run welcome, and a dynamic tray menu.
 
 Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
