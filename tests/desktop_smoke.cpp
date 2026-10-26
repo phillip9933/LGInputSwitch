@@ -64,8 +64,11 @@ int main(int argc, char **argv)
     const auto log = temporary.path() + "/commands";
     QFile fake(temporary.path() + "/ddcutil");
     check(fake.open(QIODevice::WriteOnly), "Could not create fake backend");
-    fake.write(("#!/bin/sh\nif [ \"$1\" = detect ]; then\nprintf 'Display 1\\n   I2C bus: /dev/i2c-6\\n   "
-                "Model: Synthetic LG\\n'\nelse\nprintf '%s\\n' \"$@\" > '" +
+    fake.write(("#!/bin/sh\nif [ \"$1\" = detect ]; then\nprintf 'Invalid display\\n   I2C bus: "
+                "/dev/i2c-4\\n   Monitor: SDC:Internal panel:REDACTED\\n"
+                "Display 1\\n   I2C bus: /dev/i2c-29\\n   Model: Synthetic Dell\\n"
+                "Display 2\\n   I2C bus: /dev/i2c-31\\n   Monitor: GSM:Synthetic "
+                "LG:REDACTED\\n'\nelse\nprintf '%s\\n' \"$@\" > '" +
                 log + "'\nfi\n")
                    .toUtf8());
     fake.close();
@@ -75,10 +78,11 @@ int main(int argc, char **argv)
         DesktopWindow live(false);
         live.show();
         auto *monitors = live.findChild<QComboBox *>("monitors");
-        check(waitUntil([&] { return monitors->count() == 1 && monitors->isEnabled(); }),
+        check(waitUntil([&] { return monitors->count() == 2 && monitors->isEnabled(); }),
               "Asynchronous discovery did not finish");
         check(monitors->currentIndex() == -1, "Discovery silently selected an unconfigured target");
-        monitors->setCurrentIndex(0);
+        check(monitors->itemText(1) == "Synthetic LG · I²C 31", "Brief monitor model/route not displayed");
+        monitors->setCurrentIndex(1);
         auto *table = live.findChild<QTableWidget *>("inputs");
         table->item(0, 2)->setText("0xD0");
         for (auto *button : live.findChildren<QPushButton *>())
@@ -99,11 +103,11 @@ int main(int argc, char **argv)
               "Asynchronous input send did not finish");
         QFile record(log);
         check(record.open(QIODevice::ReadOnly), "No backend command recorded");
-        check(record.readAll() == "--bus\n6\nsetvcp\n0xf4\n0xd0\n--i2c-source-addr=0x50\n--noverify\n",
+        check(record.readAll() == "--bus\n31\nsetvcp\n0xf4\n0xd0\n--i2c-source-addr=0x50\n--noverify\n",
               "GUI sent wrong target or command");
         QString warning;
         auto saved = LoadDesktopConfig(warning);
-        check(saved.display == 6 && saved.bus && saved.inputs[0].code == "0xD0",
+        check(saved.display == 31 && saved.bus && saved.inputs[0].code == "0xD0",
               "Config roundtrip changed selected target/custom code");
         QTimer::singleShot(0, &live, [&live] { live.close(); });
         QTimer::singleShot(3000, &app, [&app] { app.exit(91); });

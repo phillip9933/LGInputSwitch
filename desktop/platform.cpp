@@ -225,8 +225,16 @@ Discovery DiscoverDesktopMonitors()
         auto model = QRegularExpression("Model:\\s+(.+)").match(line);
         if (model.hasMatch() && current.display >= 0)
             current.label = model.captured(1).trimmed();
+        // ddcutil 3 brief output uses manufacturer:model:serial instead of a
+        // separate Model field. Show the model, without the serial number.
+        auto monitor = QRegularExpression("Monitor:\\s+([^:]+):([^:]+)").match(line);
+        if (monitor.hasMatch() && current.display >= 0)
+            current.label = monitor.captured(2).trimmed();
     }
     append();
+    for (auto &monitor : result.monitors)
+        monitor.label += monitor.bus ? QString(" · I²C %1").arg(monitor.display)
+                                     : QString(" · Display %1").arg(monitor.display);
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
     {
         result.monitors.clear();
