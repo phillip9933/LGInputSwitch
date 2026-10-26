@@ -20,3 +20,19 @@ jobs:
       with:
         name: LGInputSwitch-Build
         path: BuildOutput\LGInputSwitch.exe
+    - name: Configure regression tests
+      run: cmake -S . -B build-tests -A x64
+    - name: Build regression tests
+      run: cmake --build build-tests --config Release
+    - name: Run regression tests
+      run: ctest --test-dir build-tests -C Release --output-on-failure
+  regression-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Configure regression tests
+      run: cmake -S . -B build-tests
+    - name: Build regression tests
+      run: cmake --build build-tests
+    - name: Run regression tests
+      run: ctest --test-dir build-tests --output-on-failure

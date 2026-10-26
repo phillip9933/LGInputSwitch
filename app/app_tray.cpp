@@ -5,6 +5,7 @@
 #include "util.h"
 #include "settings_ui.h"
 #include "welcome_ui.h"
+#include "../platform/windows/startup.h"
 #include "../resource/resource.h"
 
 #include <windows.h>
@@ -40,7 +41,7 @@ static void Balloon(const wchar_t* msg) {
     if (!g_cfg.showNotifications) return;
     nid.uFlags = NIF_INFO;
     wcscpy_s(nid.szInfoTitle, L"LGInputSwitch");
-    wcscpy_s(nid.szInfo, msg);
+    wcsncpy_s(nid.szInfo, msg, _TRUNCATE);
     Shell_NotifyIcon(NIM_MODIFY, &nid);
 }
 
@@ -70,9 +71,11 @@ static HMENU Menu() {
 }
 
 static void RegisterHK(HWND hwnd) {
+    bool failed = false;
     HotkeySpec hs{};
     if (ParseHotkey(g_cfg.hotkeys.cycle, hs))
-        RegisterHotKey(hwnd, HKID_CYCLE, hs.fsModifiers, hs.vk);
+        failed = !RegisterHotKey(hwnd, HKID_CYCLE, hs.fsModifiers | MOD_NOREPEAT, hs.vk);
+    else if (!g_cfg.hotkeys.cycle.empty()) failed = true;
 
     UINT base = 100;
     g_directById.clear();
@@ -80,10 +83,13 @@ static void RegisterHK(HWND hwnd) {
         HotkeySpec h2{};
         if (ParseHotkey(kv.second, h2)) {
             UINT id = base++;
-            if (RegisterHotKey(hwnd, id, h2.fsModifiers, h2.vk))
+            if (RegisterHotKey(hwnd, id, h2.fsModifiers | MOD_NOREPEAT, h2.vk))
                 g_directById[id] = kv.first; // label
-        }
+            else failed = true;
+        } else if (!kv.second.empty()) failed = true;
     }
+    if (failed) MessageBox(hwnd, L"One or more hotkeys are invalid or already in use. Open Settings to choose different combinations.",
+        L"LG Input Switch", MB_OK | MB_ICONWARNING);
 }
 
 static std::vector<InputDef> OrderedInputs() {
@@ -97,7 +103,7 @@ static std::vector<InputDef> OrderedInputs() {
     // 1) take items from cycleOrder that are enabled
     for (auto& name : g_cfg.cycleOrder) {
         auto it = enabled.find(name);
-        if (it != enabled.end()) {
+        if (it != enabled.end() && !used.count(name)) {
             out.push_back(*it->second);
             used.insert(name);
         }
@@ -111,6 +117,14 @@ static std::vector<InputDef> OrderedInputs() {
         for (auto& in : g_cfg.inputs) out.push_back(in);
     }
     return out;
+}
+
+static void RememberInput(const std::string& label) {
+    auto ordered = OrderedInputs();
+    g_cycleIndex = -1;
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        if (ordered[i].label == label) { g_cycleIndex = (int)i; break; }
+    }
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -135,11 +149,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 DestroyWindow(hwnd);
                 return 0;
             }
-            SaveConfig(g_cfg);
         }
 
         if (g_cfg.targets.empty()) g_cfg.targets.push_back({ 5,0 });
         g_target = { g_cfg.targets[0].first, g_cfg.targets[0].second };
+        if (!SetStartWithWindows(g_cfg.startWithWindows))
+            Balloon(L"Could not update Start with Windows. Check Settings and try again.");
         RegisterHK(hwnd);
         return 0;
     }
@@ -156,7 +171,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     ? ToW(ord[g_cycleIndex].label) : L"Switched";
                 Balloon(msg.c_str());
             } else {
-                Balloon(L"Switch failed (check I2C/target)");
+                Balloon(ToW(LastInputError()).c_str());
             }
             return 0;
         }
@@ -166,10 +181,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             for (size_t i = 0; i < g_cfg.inputs.size(); ++i) {
                 if (g_cfg.inputs[i].label == it->second) {
                     if (SendInputCode(g_target, g_cfg.i2cSourceAddr.c_str(), g_cfg.inputs[i].code.c_str())) {
-                        g_cycleIndex = (int)i;
+                        RememberInput(it->second);
                         Balloon(ToW(it->second).c_str());
                     } else {
-                        Balloon(L"Switch failed (check I2C/target)");
+                        Balloon(ToW(LastInputError()).c_str());
                     }
                     break;
                 }
@@ -214,10 +229,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (i < g_cfg.inputs.size()) {
                 const auto& in = g_cfg.inputs[i];
                 if (SendInputCode(g_target, g_cfg.i2cSourceAddr.c_str(), in.code.c_str())) {
-                    g_cycleIndex = (int)i;
+                    RememberInput(in.label);
                     Balloon(ToW(in.label).c_str());
                 } else {
-                    Balloon(L"Switch failed (check I2C/target)");
+                    Balloon(ToW(LastInputError()).c_str());
                 }
             }
             return 0;
@@ -236,6 +251,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         AppConfig tmp;
         if (LoadConfig(tmp)) {
             g_cfg = tmp;
+            g_cycleIndex = -1;
+            if (!SetStartWithWindows(g_cfg.startWithWindows))
+                MessageBox(hwnd, L"Settings saved, but Start with Windows could not be updated.",
+                    L"LG Input Switch", MB_OK | MB_ICONWARNING);
             if (!g_cfg.targets.empty())
                 g_target = { g_cfg.targets[0].first, g_cfg.targets[0].second };
             UnregisterAllHotkeys(hwnd);

@@ -2,7 +2,9 @@
 
 ## Roadmap and work
 
-[Release roadmap](https://github.com/users/phillip9933/projects/2/views/2) · [Work board](https://github.com/users/phillip9933/projects/2/views/1) · [Issue conventions](CONTRIBUTING.md#public-roadmap-and-issue-management)
+[Windows release scope](https://github.com/phillip9933/LGInputSwitch/issues/8) · [Open work](https://github.com/phillip9933/LGInputSwitch/issues) · [Issue conventions](CONTRIBUTING.md#public-roadmap-and-issue-management)
+
+The previous board links pointed to another project (Kura). LGInputSwitch currently has no linked public project; use the issue list until a dedicated board is configured.
 
 Follow release scope and maturity separately from individual work. Dates are estimates; unscheduled ideas have no release milestone.
 
@@ -19,6 +21,7 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 - **Settings UI** with first-run welcome
 - **Cycle order** respects enabled inputs and your chosen order
 - **Notifications** (optional), **debounce**, and **I²C address** (LG often `0x50`)
+- **Start with Windows**: Settings checkbox, applied to the current user's logon. You can also edit `startWithWindows` in config.json and restart the app. Windows Startup Apps settings can independently disable startup.
 
 ## Download / Run
 1. Download the latest release from the **Releases** page.
@@ -31,6 +34,10 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 - Open the solution, set **x64 / Release**, and **Build**.
 - This repo includes everything we used during development, including ADL glue.
 - If you replace ADL headers with your own copy, ensure your include paths still point to them.
+
+Hardware-free regression tests: `cmake -S . -B build-tests`, `cmake --build build-tests --config Release`, then `ctest --test-dir build-tests -C Release --output-on-failure`. The Windows startup test writes and removes this app's per-user Run entry; run it in an isolated test account/CI runner.
+
+See [code review and verification](docs/maintenance-review.md) and the [cross-platform architecture proposal](docs/cross-platform-design.md).
 
 ### Project layout (simplified)
 
@@ -63,6 +70,7 @@ ATTRIBUTIONS.md
   https://github.com/nlohmann/json
 - **AMD ADL SDK** — Provided under AMD’s SDK EULA (proprietary). AMD retains ownership of the SDK.
 - DDC/CI references — ddcutil docs/wiki and other notes (documentation only).
+- **Jason7536/lg-input-switch** — Separate Intel IGCL-based Windows port: https://github.com/Jason7536/lg-input-switch . Intel GPU users can evaluate that project; its compatibility is maintained independently.
 
 See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) and [ATTRIBUTIONS.md](./ATTRIBUTIONS.md) for details.
 

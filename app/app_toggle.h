@@ -4,6 +4,7 @@
 #include "types.h"
 
 bool SendInputCode(const Target& t, const char* i2cAddrHex, const char* codeHex);
+const std::string& LastInputError();
 bool ToggleCycle(const Target& t, const char* i2cAddrHex,
     const std::vector<InputDef>& orderedInputs,
     int& inOutIndex);
