@@ -39,6 +39,32 @@ Hardware-free regression tests: `cmake -S . -B build-tests`, `cmake --build buil
 
 See [code review and verification](docs/maintenance-review.md) and the [cross-platform architecture proposal](docs/cross-platform-design.md).
 
+## Linux CLI (experimental)
+
+An initial CLI uses the installed `ddcutil` tool and the shared command-value
+validation. This is a development preview; Linux tray, hotkeys and settings UI
+will follow hardware validation. Windows JSON is not migrated or read by this CLI.
+
+Build with a C++17 compiler and CMake:
+
+```
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/lginputswitch detect
+./build/lginputswitch switch --display 1 --input 0x90 --dry-run
+```
+
+Install `ddcutil` using your distribution's package manager and configure its
+normal I2C device access. Review the preview, then omit `--dry-run` to send the
+command to the selected monitor. Use a known input code for your monitor; the
+example selects HDMI1 on some LG models. `--bus N` can select a specific I2C bus
+instead of a display number. See [Linux setup and verification](docs/linux-cli.md).
+
+The long-term target is one app for AMD, Intel and NVIDIA systems on Windows and
+Linux, followed by macOS. Current Windows releases still require AMD; adding a
+backend or CLI does not establish compatibility for untested hardware.
+
 ### Project layout (simplified)
 
 /src
