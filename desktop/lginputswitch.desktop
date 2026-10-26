@@ -5,5 +5,6 @@ Comment=Switch LG monitor inputs from your desktop
 Exec=LGInputSwitchDesktop
 Icon=lginputswitch
 Terminal=false
-Categories=Utility;Settings;
+Categories=Utility;
 StartupWMClass=LGInputSwitchDesktop
+Keywords=LG;monitor;display;input;DDC;

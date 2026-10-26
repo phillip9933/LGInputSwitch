@@ -3,9 +3,10 @@
 This project incorporates or was inspired by the following:
 
 ## AMD Display Library (ADL) SDK
-- License: AMD SDK EULA (proprietary / not open source)
-- Notes: ADL headers and libraries are owned by AMD and provided under their SDK EULA.
-- We include/consume ADL for building and running this tool on AMD GPUs.
+- License: MIT for the bundled `adl-sdk/include/` headers, as stated in each header.
+- Copyright (c) 2016–2022 Advanced Micro Devices, Inc.
+- Preserve the full notices in these headers and `licenses/AMD-ADL-MIT.txt`.
+- AMD driver runtime DLLs are loaded from the installed driver and are not bundled.
 
 ## nlohmann/json
 - License: MIT
@@ -32,3 +33,6 @@ This project incorporates or was inspired by the following:
 - Dynamically linked when available; no source is vendored.
 - Configurable global shortcuts for KDE Plasma: https://api.kde.org/kglobalaccel.html .
 - Preserve applicable KDE Frameworks license notices when packaging this dependency.
+
+The project AGPL license does not relicense any of these dependencies.
+The Linux binary links distribution-provided Qt/KDE; those runtimes are not bundled.

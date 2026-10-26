@@ -19,7 +19,7 @@ backend has hardware evidence.
 3. **Linux and Windows UX:** use the validated transports to improve setup,
    monitor selection, custom input mappings, shortcuts, diagnostics and recovery.
    Choose a shared UI framework only after a small tray/hotkey prototype on both
-   operating systems. Qt 6 is a candidate, not a committed rewrite.
+   operating systems. Qt 6 now supplies the optional shared desktop frontend; the original Windows UI remains available pending hardware validation.
 4. **macOS last:** first prototype monitor access on actual Intel/Apple Silicon
    hardware and each connection type, then add the backend and desktop experience.
    Do not promise support based on the Linux implementation.
@@ -110,7 +110,7 @@ entire tray apps into this repository.
 | Reference | Candidate backend | Integration constraints |
 | --- | --- | --- |
 | [Jason7536/lg-input-switch](https://github.com/Jason7536/lg-input-switch) | Intel IGCL discovery + I2C write | MIT license; retain notices for reused code. Its implementation requires elevated writes. Validate with current Intel documentation and decide a narrow privilege boundary before integrating. |
-| [meer-cha/lg-input-switch](https://github.com/meer-cha/lg-input-switch) | NVIDIA NVAPI discovery + raw I2C | Repository LICENSE is GPL v3. Do not copy its implementation into this MIT project without an explicit license decision or suitable permission. Implement from vendor API documentation and independently tested protocol requirements. |
+| [meer-cha/lg-input-switch](https://github.com/meer-cha/lg-input-switch) | NVIDIA NVAPI discovery + raw I2C | Repository LICENSE is GPL v3. The maintainer has selected AGPL-3.0-or-later for future LGInputSwitch releases. Review the exact source licenses and preserve attribution before any reuse; no code has been imported. Implement from vendor API documentation and independently tested protocol requirements. |
 
 No reference code is imported by this patch. Repository activity alone is not
 evidence that a project is abandoned; consolidation does not depend on that claim.

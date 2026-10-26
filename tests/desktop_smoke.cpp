@@ -33,6 +33,33 @@ int main(int argc, char **argv)
     QTemporaryDir temporary;
     check(temporary.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temporary.path());
+#ifndef Q_OS_WIN
+    qputenv("XDG_CONFIG_HOME", temporary.path().toUtf8());
+    const auto startupPath = temporary.path() + "/autostart/lginputswitch.desktop";
+    const auto executable = temporary.path() + "/LG Input ü \" $`%\\";
+    QString startupError;
+    check(SetDesktopAutostart(false, startupError, startupPath, executable), "Startup opt-out failed");
+    check(!QFile::exists(startupPath), "Startup created a file before opt-in");
+    check(SetDesktopAutostart(true, startupError, startupPath, executable), "Startup opt-in failed");
+    check(DesktopAutostartEnabled(startupPath), "Startup state not read back");
+    QFile startupFile(startupPath);
+    check(startupFile.open(QIODevice::ReadOnly), "Startup entry not readable");
+    const auto startupContents = startupFile.readAll();
+    check(startupContents.contains(" --background\n"), "Background startup argument missing");
+    check(startupContents.contains("%%"), "Literal percent was not escaped");
+    check(startupContents.contains("\\\\$"), "Exec dollar quoting lost a layer");
+    startupFile.close();
+    check(!SetDesktopAutostart(true, startupError, startupPath, "/invalid\npath"),
+          "Newline injection accepted in startup entry");
+    check(DesktopAutostartEnabled(startupPath), "Rejected update damaged startup entry");
+    check(SetDesktopAutostart(false, startupError, startupPath, executable), "Startup disable failed");
+    check(!DesktopAutostartEnabled(startupPath), "Startup disable not reflected");
+    QFile blocker(temporary.path() + "/not-a-directory");
+    check(blocker.open(QIODevice::WriteOnly), "Could not create failure fixture");
+    blocker.close();
+    check(!SetDesktopAutostart(true, startupError, blocker.fileName() + "/entry", executable),
+          "Unwritable startup path was accepted");
+#endif
     {
         DesktopWindow preview(true);
         preview.show();

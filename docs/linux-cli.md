@@ -81,9 +81,10 @@ write-free preview, invalid/duplicate/injected arguments, child failures/signals
 missing/non-executable dependencies, and help. These tests use a temporary fake
 ddcutil and cannot write to a monitor. Existing C++ regressions remain separate.
 
-A real discovery attempt with installed ddcutil 3.0.2 reported no `/dev/i2c`
-devices and returned status 1, which the CLI propagated. No real input-switch
-command was executed. There is no hardware-verified Linux support claim yet.
+The development sandbox initially hid I2C devices. Discovery outside that sandbox
+found the attached displays with ddcutil 3.0.2. The maintainer has since confirmed
+physical input switching on an LG UltraGear in CachyOS/KDE Wayland. Automated
+tests still use fake hardware; other monitor/GPU combinations remain unverified.
 
 For hardware acceptance, first record the successful standalone ddcutil command,
 then compare this CLI's preview and test the same operation in both directions.

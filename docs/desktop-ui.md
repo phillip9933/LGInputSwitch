@@ -49,7 +49,7 @@ same assignments: changes in Plasma update the app and its saved preferences,
 and app changes update Plasma. Unsaved app edits remain drafts until saved.
 
 Other desktops (or builds without KGlobalAccel) retain the desktop-configured CLI
-fallback. Linux autostart is not installed by this increment. GNOME requires tray support via an appropriate
+fallback. Linux offers opt-in per-user desktop autostart; see [installation and upgrades](linux-install.md). GNOME requires tray support via an appropriate
 extension; desktops without a tray can use the window. Tray-host and Wayland
 integration require desktop-specific manual testing.
 
@@ -113,7 +113,7 @@ References: [Qt color scheme](https://doc.qt.io/qt-6/qstylehints.html#colorSchem
 
 Native shortcut registration, readback, cleanup and non-stealing conflict handling
 were tested against the actual CachyOS/Plasma Wayland session using temporary
-actions with no monitor callbacks. Physical key activation remains a user check.
+actions with no monitor callbacks. The maintainer subsequently confirmed physical shortcut activation and the linked Plasma application catalogue work on CachyOS/KDE Wayland.
 The probe source is tests/kde_shortcut_probe.cpp.
 
 ## Linked shortcut action catalogue

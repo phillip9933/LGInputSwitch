@@ -2,6 +2,9 @@
 #include "../core/input_value.h"
 #include "kde_shortcuts.h"
 #include "platform.h"
+#ifndef Q_OS_WIN
+#include "linux_autostart.h"
+#endif
 #include <QtConcurrent>
 #include <QtWidgets>
 #include <map>
@@ -241,6 +244,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 #ifdef Q_OS_WIN
         if (!SetStartWithWindows(config_.startup))
             message("Settings saved, but Windows startup could not be updated.");
+#else
+        if (!SetDesktopAutostart(config_.startup, error))
+        {
+            config_.startup = DesktopAutostartEnabled();
+            const QSignalBlocker blocker(startup_);
+            startup_->setChecked(config_.startup);
+            message("Settings saved, but startup could not be updated. " + error);
+        }
 #endif
     }
     void syncShortcut(int index, const QKeySequence &key)
@@ -672,6 +683,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         notifications_->setChecked(config_.notifications);
         form->addRow("Notifications", notifications_);
         startup_ = new QCheckBox("Launch when I sign in to Windows", preferences);
+        startup_->setObjectName("startup");
         startup_->setChecked(config_.startup);
         cycleShortcut_ =
             new QKeySequenceEdit(QKeySequence::fromString(config_.cycleShortcut, QKeySequence::PortableText));
@@ -690,7 +702,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         form->addRow("Cycle shortcut", cycleShortcut_);
         form->addRow("Previous input", previousShortcut_);
 #else
-        startup_->hide();
+        startup_->setText("Launch when I sign in");
+        form->addRow("Startup", startup_);
         if (kdeAvailable_)
         {
             form->addRow("Global shortcuts", globalShortcuts_);
@@ -717,6 +730,12 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             form->addRow("Linux shortcuts", help);
         }
 #endif
+        auto *license =
+            new QLabel("LG Input Switch · AGPL-3.0-or-later · "
+                       "<a href=\"https://github.com/phillip9933/LGInputSwitch\">Source and license</a>");
+        license->setOpenExternalLinks(true);
+        license->setWordWrap(true);
+        form->addRow(license);
         tabs->addTab(preferences, "Preferences");
         auto *advanced = new QFrame;
         advanced->setObjectName("card");
@@ -903,8 +922,16 @@ int main(int argc, char **argv)
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
-    const QStringList args = app.arguments();
-    const bool preview = args.contains("--preview");
+    QCommandLineParser parser;
+    parser.setApplicationDescription("LG monitor input switching with a tray and global shortcuts.");
+    parser.addHelpOption();
+    parser.addOption({"preview", "Show synthetic data without accessing settings or hardware."});
+    parser.addOption({"background", "Start in the tray when a tray host is available."});
+    parser.addOption({"screenshot-dir", "Render design previews (requires --preview).", "directory"});
+    parser.process(app);
+    const bool preview = parser.isSet("preview");
+    if (parser.isSet("screenshot-dir") && !preview)
+        parser.showHelp(2);
     std::unique_ptr<QLockFile> lock;
     if (!preview)
     {
@@ -913,17 +940,18 @@ int main(int argc, char **argv)
         lock = std::make_unique<QLockFile>(path + "/desktop.lock");
         if (!lock->tryLock())
         {
-            QMessageBox::information(nullptr, "LG Input Switch",
-                                     "The desktop app is already running. Open it from the tray.");
+            if (!parser.isSet("background"))
+                QMessageBox::information(nullptr, "LG Input Switch",
+                                         "The desktop app is already running. Open it from the tray.");
             return 0;
         }
     }
     DesktopWindow window(preview);
-    window.show();
-    const int screenshot = args.indexOf("--screenshot-dir");
-    if (preview && screenshot >= 0 && screenshot + 1 < args.size())
+    if (preview || !parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable())
+        window.show();
+    if (preview && parser.isSet("screenshot-dir"))
         QTimer::singleShot(300, &window, [&] {
-            window.capture(args[screenshot + 1]);
+            window.capture(parser.value("screenshot-dir"));
             app.quit();
         });
     return app.exec();

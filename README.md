@@ -1,4 +1,4 @@
-# LG Input Switch (Windows Tray)
+# LG Input Switch
 
 ## Roadmap and work
 
@@ -8,11 +8,11 @@ The previous board links pointed to another project (Kura). LGInputSwitch curren
 
 Follow release scope and maturity separately from individual work. Dates are estimates; unscheduled ideas have no release milestone.
 
-A small Windows tray utility that switches **LG monitor inputs** (DisplayPort / USB-C / HDMI1 / HDMI2) on **AMD GPUs** using **DDC/CI over I²C**, with configurable hotkeys, a settings dialog, first-run welcome, and a dynamic tray menu.
+Originally a small Windows tray utility that switches **LG monitor inputs** (DisplayPort / USB-C / HDMI1 / HDMI2) on **AMD GPUs** using **DDC/CI over I²C**, with configurable hotkeys, a settings dialog, first-run welcome, and a dynamic tray menu.
 
 Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 
-> **⚠ AMD-ONLY:** This app uses AMD’s ADL to talk I²C/DDC. It will not work on non-AMD GPUs.  
+> **Windows requires AMD:** Windows uses AMD ADL. The Linux beta uses ddcutil; GPU and monitor support must be verified for each setup.
 > **⚠ I²C WARNING:** DDC/CI commands are sent directly to your monitor. Use at your own risk. Malformed commands can cause misbehavior on some displays.
 
 ## Features
@@ -23,7 +23,7 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 - **Notifications** (optional), **debounce**, and **I²C address** (LG often `0x50`)
 - **Start with Windows**: Settings checkbox, applied to the current user's logon. You can also edit `startWithWindows` in config.json and restart the app. Windows Startup Apps settings can independently disable startup.
 
-## Download / Run
+## Download / Run (Windows)
 1. Download the latest release from the **Releases** page.
 2. Run `LGInputSwitch.exe`.  
    - On first run it creates `config.json` next to the EXE and opens **Settings**.
@@ -48,8 +48,8 @@ See [code review and verification](docs/maintenance-review.md) and the [cross-pl
 ## Linux CLI (experimental)
 
 An initial CLI uses the installed `ddcutil` tool and the shared command-value
-validation. This is a development preview; Linux tray, hotkeys and settings UI
-will follow hardware validation. Windows JSON is not migrated or read by this CLI.
+validation. This is a development preview; A shared Qt tray/settings GUI and linked KDE Plasma shortcuts are now available
+as a Linux beta; see [Linux installation](docs/linux-install.md). Windows JSON is not migrated or read by this CLI.
 
 Build with a C++17 compiler and CMake:
 
@@ -100,18 +100,21 @@ ATTRIBUTIONS.md
   https://github.com/amildahl/amdddc-windows
 - **nlohmann/json** — MIT  
   https://github.com/nlohmann/json
-- **AMD ADL SDK** — Provided under AMD’s SDK EULA (proprietary). AMD retains ownership of the SDK.
+- **AMD ADL SDK headers** — MIT notices are embedded in the bundled headers; AMD retains its copyright. Driver binaries are not bundled.
 - DDC/CI references — ddcutil docs/wiki and other notes (documentation only).
 - **Jason7536/lg-input-switch** — Separate Intel IGCL-based Windows port: https://github.com/Jason7536/lg-input-switch . Intel GPU users can evaluate that project; its compatibility is maintained independently.
 
-See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) and [ATTRIBUTIONS.md](./ATTRIBUTIONS.md) for details.
+Project code is **AGPL-3.0-or-later** for future releases; see [LICENSE.md](LICENSE.md)
+and [copyright and source distribution](COPYRIGHT.md). Earlier MIT releases retain
+their original terms. Dependencies keep their own licenses; see
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ---
 
 ## Disclaimer
 This project is not affiliated with AMD or LG. Use at your own risk.
 
-## Modern desktop preview (Windows and Linux)
+## Modern desktop beta (Windows and Linux)
 
 An optional shared tray/settings frontend adds a refreshed layout, scalable monitor
 icon, shortcut recording on Windows, asynchronous monitor operations and system,
@@ -121,3 +124,12 @@ light and dark appearance modes. Build with Qt 6.5+ using
 limitations](docs/desktop-ui.md). The Linux GUI uses ddcutil. KDE Plasma builds with KGlobalAccel can record and
 register shortcuts directly in the app; other desktops retain the CLI fallback. Real OS theme/tray and hardware
 validation is required before replacing the existing Windows frontend.
+
+
+CachyOS/KDE Wayland testing has verified monitor switching, the tray/settings UI
+and linked Plasma shortcuts. Linux offers opt-in startup and cycle/previous/direct
+input shortcuts. [Install the native Arch/CachyOS beta package](docs/linux-install.md)
+or build from source. Windows' modern GUI remains experimental pending physical
+validation; use the legacy frontend for the focused maintenance candidate.
+
+See [candidate release notes and publication gates](docs/release-candidate.md).

@@ -98,7 +98,7 @@ jobs:
     container: archlinux:base-devel
     steps:
     - name: Install distro Qt and KDE development dependencies
-      run: pacman -Syu --noconfirm git cmake qt6-base kglobalaccel python
+      run: pacman -Syu --noconfirm git cmake qt6-base qt6-wayland kglobalaccel ddcutil python desktop-file-utils
     - uses: actions/checkout@v4
     - name: Configure with KDE shortcuts
       run: cmake -S . -B build-kde -DLG_BUILD_DESKTOP=ON
@@ -106,3 +106,21 @@ jobs:
       run: cmake --build build-kde --parallel 2
     - name: Run hardware-free regressions
       run: ctest --test-dir build-kde --output-on-failure
+    - name: Build installable Arch and CachyOS beta package
+      run: |
+        useradd -m builder
+        chown -R builder:builder "$GITHUB_WORKSPACE"
+        runuser -u builder -- python3 scripts/prepare-arch-package.py --output build-arch-source
+        runuser -u builder -- bash -c 'cd build-arch-source && makepkg --noconfirm --nodeps'
+        cd build-arch-source
+        sha256sum ./*.pkg.tar.zst >> SHA256SUMS
+    - name: Upload Linux package and corresponding source
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-CachyOS-Arch-beta
+        path: |
+          build-arch-source/*.pkg.tar.zst
+          build-arch-source/lginputswitch-source.tar.gz
+          build-arch-source/PKGBUILD
+          build-arch-source/SOURCE_REVISION
+          build-arch-source/SHA256SUMS

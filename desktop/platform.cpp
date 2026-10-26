@@ -5,6 +5,7 @@
 #include "../platform/windows/adl_transport.h"
 #else
 #include "../platform/linux/ddcutil_backend.h"
+#include "linux_autostart.h"
 #endif
 
 DesktopConfig LoadDesktopConfig(QString &warning)
@@ -55,6 +56,7 @@ DesktopConfig LoadDesktopConfig(QString &warning)
     c.notifications = legacy.showNotifications;
     c.startup = legacy.startWithWindows;
 #else
+    c.startup = DesktopAutostartEnabled();
     c.globalShortcuts = prefs.value("globalShortcuts", false).toBool();
     c.cycleShortcut = prefs.value("cycleShortcut", c.cycleShortcut).toString();
     c.display = prefs.value("target", -1).toInt();
