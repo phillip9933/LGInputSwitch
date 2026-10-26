@@ -1,3 +1,4 @@
+#include "../core/input_history.h"
 #include "../core/input_value.h"
 #include "kde_shortcuts.h"
 #include "platform.h"
@@ -45,6 +46,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     QCheckBox *globalShortcuts_;
     bool preview_, busy_ = false, dirty_ = false, quitting_ = false;
     int position_ = -1;
+    lg::InputHistory history_;
+    bool recordingShortcut_ = false;
     QThreadPool worker_;
     QSystemTrayIcon *tray_;
     QMenu *menu_;
@@ -54,13 +57,13 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     QLineEdit *source_;
     QSpinBox *debounce_;
     QCheckBox *notifications_, *startup_;
-    QKeySequenceEdit *cycleShortcut_;
+    QKeySequenceEdit *cycleShortcut_, *previousShortcut_;
     QPushButton *refresh_, *save_, *cycle_;
     QWidget *controls_;
     QVector<DesktopMonitor> detected_;
     QElapsedTimer lastSend_;
 #ifdef Q_OS_WIN
-    std::map<int, QString> hotkeys_;
+    std::map<int, int> hotkeys_;
 #endif
     void showWindow()
     {
@@ -111,6 +114,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         c.startup = startup_->isChecked();
         c.globalShortcuts = globalShortcuts_->isChecked();
         c.cycleShortcut = cycleShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
+        c.previousShortcut = previousShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
         int selected = monitors_->currentIndex();
         if (selected >= 0 && selected < detected_.size())
         {
@@ -176,7 +180,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             shortcuts.insert(text);
             return true;
         };
-        if (!validateShortcut(c.cycleShortcut))
+        if (!validateShortcut(c.cycleShortcut) || !validateShortcut(c.previousShortcut))
         {
             error = "Choose a supported, unique cycle shortcut.";
             return false;
@@ -219,6 +223,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             message(error);
             return;
         }
+        if (config_.adapter != next.adapter || config_.display != next.display || config_.bus != next.bus ||
+            config_.source != next.source)
+            history_.reset();
         config_ = next;
         dirty_ = false;
         position_ = -1;
@@ -226,52 +233,85 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         message(monitors_->currentIndex() < 0
                     ? "Settings saved. Select an available monitor before switching."
                     : "Settings saved. Ready to switch.");
-        registerHotkeys();
+        registerHotkeys(true);
         rebuildMenu();
 #ifdef Q_OS_WIN
         if (!SetStartWithWindows(config_.startup))
             message("Settings saved, but Windows startup could not be updated.");
 #endif
     }
-    void registerHotkeys()
+    void syncShortcut(int index, const QKeySequence &key)
+    {
+        const auto text = key.toString(QKeySequence::PortableText).toUpper();
+        QKeySequenceEdit *editor = nullptr;
+        if (index == -1)
+        {
+            config_.cycleShortcut = text;
+            editor = cycleShortcut_;
+        }
+        else if (index == -2)
+        {
+            config_.previousShortcut = text;
+            editor = previousShortcut_;
+        }
+        else if (index >= 0 && index < config_.inputs.size())
+        {
+            config_.inputs[index].shortcut = text;
+            editor = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(index, 3));
+        }
+        if (editor && !dirty_)
+        {
+            QSignalBlocker block(editor);
+            editor->setKeySequence(key);
+        }
+        QString error;
+        if (!preview_ && !SaveDesktopShortcutPreferences(config_, error))
+            message(error);
+    }
+    void registerHotkeys(bool applyEdits = false)
     {
         if (preview_)
             return;
 #ifdef Q_OS_WIN
+        Q_UNUSED(applyEdits);
         for (const auto &item : hotkeys_)
             UnregisterHotKey(nullptr, item.first);
         hotkeys_.clear();
         int id = 1;
         bool failed = false;
-        auto bind = [&](const QString &text, const QString &label) {
+        auto bind = [&](const QString &text, int index) {
             if (text.isEmpty())
                 return;
             HotkeySpec spec{};
             if (ParseHotkey(text.toStdString(), spec) &&
                 RegisterHotKey(nullptr, id, spec.fsModifiers | MOD_NOREPEAT, spec.vk))
-                hotkeys_[id] = label;
+                hotkeys_[id] = index;
             else
                 failed = true;
             ++id;
         };
-        bind(config_.cycleShortcut, {});
-        for (const auto &row : config_.inputs)
-            if (row.enabled)
-                bind(row.shortcut, row.label);
+        bind(config_.cycleShortcut, -1);
+        bind(config_.previousShortcut, -2);
+        for (int i = 0; i < config_.inputs.size(); ++i)
+            if (config_.inputs[i].enabled)
+                bind(config_.inputs[i].shortcut, i);
         if (failed)
-            message(
-                "Some shortcuts are invalid or in use by another app. Choose different shortcuts and save.");
+            message("Some shortcuts are invalid or in use. Choose different shortcuts and save.");
 #else
         kdeShortcuts_.clear();
-        if (!kdeAvailable_ || !config_.globalShortcuts)
+        if (!kdeAvailable_)
             return;
         QStringList failed;
         auto bind = [&](const QString &id, const QString &label, const QString &text, int index) {
             const auto key = QKeySequence::fromString(text, QKeySequence::PortableText);
-            if (!kdeShortcuts_.bind(id, label, key, [this, index] { sendInput(index); }))
+            if (!kdeShortcuts_.bind(
+                    id, label, key, [this, index] { sendInput(index); },
+                    [this, index](const QKeySequence &actual) { syncShortcut(index, actual); }, applyEdits,
+                    config_.globalShortcuts))
                 failed.push_back(label);
         };
         bind("cycle", "Cycle inputs", config_.cycleShortcut, -1);
+        bind("previous", "Previous input", config_.previousShortcut, -2);
         for (int i = 0; i < config_.inputs.size(); ++i)
             if (config_.inputs[i].enabled)
             {
@@ -282,10 +322,12 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                         QCryptographicHash::hash(row.label.toUtf8(), QCryptographicHash::Sha256).toHex());
                 bind(id, "Switch to " + row.label, row.shortcut, i);
             }
+        // All current catalogue actions now exist; remove obsolete disabled or
+        // renamed input actions from this application's component only.
+        if (config_.globalShortcuts && failed.isEmpty())
+            KdeShortcuts::pruneInactive();
         if (!failed.isEmpty())
-            message("Shortcut unavailable: " + failed.join(", ") +
-                    ". Choose another combination, or remove your earlier manual Plasma shortcut. Existing "
-                    "bindings were not changed.");
+            message("Shortcut unavailable: " + failed.join(", ") + ". Existing assignments were not stolen.");
 #endif
     }
     void sendInput(int index)
@@ -311,7 +353,20 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         }
         if (lastSend_.isValid() && lastSend_.elapsed() < config_.debounce)
             return;
-        if (index < 0)
+        if (index == -2)
+        {
+            const auto previous = QString::fromStdString(history_.previous());
+            index = -3;
+            for (int i = 0; i < config_.inputs.size(); ++i)
+                if (config_.inputs[i].label == previous && config_.inputs[i].enabled)
+                    index = i;
+            if (index < 0)
+            {
+                message("No previous input is known yet. Select two different enabled inputs first.");
+                return;
+            }
+        }
+        if (index == -1)
         {
             int next = position_;
             for (int n = 0; n < config_.inputs.size(); ++n)
@@ -337,7 +392,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             watcher->deleteLater();
             setBusy(false);
             if (result.sent())
+            {
                 position_ = index;
+                history_.sent(row.label.toStdString());
+                rebuildMenu();
+            }
             const auto text =
                 result.sent()
                     ? row.label + " command sent. Check the monitor; this input path has no confirmation."
@@ -387,6 +446,10 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *cycle = menu_->addAction("Cycle inputs");
         cycle->setEnabled(!busy_ && !dirty_ && monitors_->currentIndex() >= 0);
         connect(cycle, &QAction::triggered, this, [this] { sendInput(-1); });
+        auto *previous = menu_->addAction("Previous input");
+        previous->setEnabled(!busy_ && !dirty_ && !history_.previous().empty() &&
+                             monitors_->currentIndex() >= 0);
+        connect(previous, &QAction::triggered, this, [this] { sendInput(-2); });
         for (int i = 0; i < config_.inputs.size(); ++i)
             if (config_.inputs[i].enabled)
             {
@@ -487,12 +550,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             auto found = hotkeys_.find(int(msg->wParam));
             if (found != hotkeys_.end())
             {
-                int index = -1;
-                if (!found->second.isEmpty())
-                    for (int i = 0; i < config_.inputs.size(); ++i)
-                        if (config_.inputs[i].label == found->second)
-                            index = i;
-                sendInput(index);
+                sendInput(found->second);
                 return true;
             }
         }
@@ -609,6 +667,10 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             new QKeySequenceEdit(QKeySequence::fromString(config_.cycleShortcut, QKeySequence::PortableText));
         cycleShortcut_->setParent(preferences);
         cycleShortcut_->setMaximumSequenceLength(1);
+        previousShortcut_ = new QKeySequenceEdit(
+            QKeySequence::fromString(config_.previousShortcut, QKeySequence::PortableText), preferences);
+        previousShortcut_->setMaximumSequenceLength(1);
+        previousShortcut_->setObjectName("previousShortcut");
         globalShortcuts_ = new QCheckBox("Enable global shortcuts while the app is running", preferences);
         globalShortcuts_->setObjectName("globalShortcuts");
         globalShortcuts_->setChecked(config_.globalShortcuts);
@@ -616,13 +678,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         globalShortcuts_->hide();
         form->addRow("Startup", startup_);
         form->addRow("Cycle shortcut", cycleShortcut_);
+        form->addRow("Previous input", previousShortcut_);
 #else
         startup_->hide();
         if (kdeAvailable_)
         {
             form->addRow("Global shortcuts", globalShortcuts_);
             form->addRow("Cycle shortcut", cycleShortcut_);
+            form->addRow("Previous input", previousShortcut_);
             cycleShortcut_->setEnabled(config_.globalShortcuts);
+            previousShortcut_->setEnabled(config_.globalShortcuts);
             auto *help =
                 new QLabel("Enable shortcuts, record combinations on Inputs, then save. Plasma handles them "
                            "even when this window is hidden. Existing shortcut conflicts are reported.");
@@ -633,6 +698,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         {
             globalShortcuts_->hide();
             cycleShortcut_->hide();
+            previousShortcut_->hide();
             table_->hideColumn(3);
             auto *help =
                 new QLabel("Native global shortcuts require KDE Plasma and the optional KGlobalAccel "
@@ -726,9 +792,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         connect(notifications_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(startup_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(cycleShortcut_, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
+        connect(previousShortcut_, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
         connect(globalShortcuts_, &QCheckBox::toggled, this, [this](bool enabled) {
 #ifndef Q_OS_WIN
             cycleShortcut_->setEnabled(enabled && kdeAvailable_);
+            previousShortcut_->setEnabled(enabled && kdeAvailable_);
             for (int i = 0; i < table_->rowCount(); ++i)
                 table_->cellWidget(i, 3)->setEnabled(enabled && kdeAvailable_);
 #endif
@@ -742,6 +810,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                     capture = true;
                     break;
                 }
+            if (capture == recordingShortcut_)
+                return;
+            recordingShortcut_ = capture;
             if (capture)
             {
 #ifdef Q_OS_WIN
@@ -816,6 +887,7 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
+    app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
     const QStringList args = app.arguments();

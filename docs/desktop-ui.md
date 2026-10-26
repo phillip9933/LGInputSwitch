@@ -42,8 +42,11 @@ Windows JSON and CLI. There is no automatic config migration. On KDE Plasma, opt
 Preferences, record combinations on Inputs and save. This works while the app is
 running, including with its window hidden. Shortcut registration is off until
 you enable it. Existing shortcuts belonging to other apps or manual Plasma
-commands are reported as conflicts and are never stolen. Shortcuts are released
-while recording and when the app quits.
+commands are reported as conflicts and are never stolen. Active shortcuts are suspended while recording and deactivated on exit; their
+Plasma assignments remain registered. LG Input Switch appears under Applications
+in Plasma Shortcuts when its desktop launcher is installed. Both editors use the
+same assignments: changes in Plasma update the app and its saved preferences,
+and app changes update Plasma. Unsaved app edits remain drafts until saved.
 
 Other desktops (or builds without KGlobalAccel) retain the desktop-configured CLI
 fallback. Linux autostart is not installed by this increment. GNOME requires tray support via an appropriate
@@ -112,3 +115,23 @@ Native shortcut registration, readback, cleanup and non-stealing conflict handli
 were tested against the actual CachyOS/Plasma Wayland session using temporary
 actions with no monitor callbacks. Physical key activation remains a user check.
 The probe source is tests/kde_shortcut_probe.cpp.
+
+## Linked shortcut action catalogue
+
+The application component matches `lginputswitch.desktop`, with a catalogue of:
+Cycle inputs, Previous input, and Switch to each enabled input. Actions with no
+key assigned remain visible for configuration. Disabling/renaming inputs removes
+obsolete actions when the active catalogue is refreshed. The earlier manually
+created command is separate and is not deleted automatically.
+
+Previous input tracks accepted commands in the current session. After selecting
+DP and then USB-C through the app, Previous selects DP; pressing it again selects
+USB-C. Re-selecting the current input and failed writes do not replace history.
+History resets when the target/source changes; the app never guesses the initial
+physical input or sends readback probes. It reports when no previous input is
+known. The same previous-input action is available to Windows desktop shortcuts.
+
+The native probe uses a separate configuration process to verify Plasma-to-app
+change signals, persistence/reload, app-to-Plasma writes and conflict handling.
+All probe callbacks are hardware-free. GUI smoke tests verify previous-input
+routing against a fake backend. No physical switch is sent by automated tests.

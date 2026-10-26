@@ -12,6 +12,7 @@ DesktopConfig LoadDesktopConfig(QString &warning)
     DesktopConfig c;
     QSettings prefs;
     c.appearance = prefs.value("appearance", "system").toString();
+    c.previousShortcut = prefs.value("previousShortcut").toString();
     const auto storedRows = QJsonDocument::fromJson(prefs.value("inputs").toByteArray()).array();
 #ifdef Q_OS_WIN
     AppConfig legacy;
@@ -132,6 +133,7 @@ bool SaveDesktopConfig(const DesktopConfig &c, QString &error)
     prefs.setValue("debounce", c.debounce);
     prefs.setValue("notifications", c.notifications);
 #endif
+    prefs.setValue("previousShortcut", c.previousShortcut);
     prefs.setValue("appearance", c.appearance);
     prefs.sync();
     if (prefs.status() != QSettings::NoError)
@@ -262,4 +264,23 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
     DdcutilTransport transport(c.bus ? "--bus" : "--display", static_cast<unsigned int>(c.display));
 #endif
     return lg::SwitchInput(transport, c.source.toStdString(), code.toStdString());
+}
+
+bool SaveDesktopShortcutPreferences(const DesktopConfig &c, QString &error)
+{
+    QSettings prefs;
+    QJsonArray rows;
+    for (const auto &row : c.inputs)
+        rows.append(QJsonObject{
+            {"label", row.label}, {"code", row.code}, {"shortcut", row.shortcut}, {"enabled", row.enabled}});
+    prefs.setValue("inputs", QJsonDocument(rows).toJson(QJsonDocument::Compact));
+    prefs.setValue("cycleShortcut", c.cycleShortcut);
+    prefs.setValue("previousShortcut", c.previousShortcut);
+    prefs.sync();
+    if (prefs.status() != QSettings::NoError)
+    {
+        error = "Could not persist the shortcut change from Plasma.";
+        return false;
+    }
+    return true;
 }

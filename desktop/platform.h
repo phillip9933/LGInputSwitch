@@ -12,7 +12,7 @@ struct DesktopConfig
                                  {"USB-C", "0xD1", "CTRL+ALT+3", true},
                                  {"HDMI1", "0x90", "CTRL+ALT+4", true},
                                  {"HDMI2", "0x91", "CTRL+ALT+5", true}};
-    QString source = "0x50", cycleShortcut = "CTRL+ALT+1", appearance = "system";
+    QString source = "0x50", cycleShortcut = "CTRL+ALT+1", appearance = "system", previousShortcut;
     int adapter = -1, display = -1, debounce = 750;
     bool bus = false, notifications = true, startup = false, globalShortcuts = false;
 };
@@ -31,3 +31,5 @@ DesktopConfig LoadDesktopConfig(QString &warning);
 bool SaveDesktopConfig(const DesktopConfig &config, QString &error);
 Discovery DiscoverDesktopMonitors();
 lg::SwitchResult SendDesktopInput(const DesktopConfig &config, const QString &code);
+
+bool SaveDesktopShortcutPreferences(const DesktopConfig &config, QString &error);

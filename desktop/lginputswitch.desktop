@@ -6,3 +6,4 @@ Exec=LGInputSwitchDesktop
 Icon=lginputswitch
 Terminal=false
 Categories=Utility;Settings;
+StartupWMClass=LGInputSwitchDesktop

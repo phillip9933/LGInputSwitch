@@ -83,6 +83,7 @@ int main(int argc, char **argv)
         check(monitors->currentIndex() == -1, "Discovery silently selected an unconfigured target");
         check(monitors->itemText(1) == "Synthetic LG · I²C 31", "Brief monitor model/route not displayed");
         monitors->setCurrentIndex(1);
+        live.findChild<QSpinBox *>()->setValue(0);
         auto *table = live.findChild<QTableWidget *>("inputs");
         table->item(0, 2)->setText("0xD0");
         for (auto *button : live.findChildren<QPushButton *>())
@@ -105,17 +106,39 @@ int main(int argc, char **argv)
         check(record.open(QIODevice::ReadOnly), "No backend command recorded");
         check(record.readAll() == "--bus\n31\nsetvcp\n0xf4\n0xd0\n--i2c-source-addr=0x50\n--noverify\n",
               "GUI sent wrong target or command");
+        record.close();
+        auto switches = live.findChildren<QPushButton *>();
+        int seen = 0;
+        for (auto *button : switches)
+            if (button->text() == "Switch" && ++seen == 2)
+            {
+                button->click();
+                break;
+            }
+        check(waitUntil([&] { return table->isEnabled(); }), "Second selection did not complete");
+        QAction *previous = nullptr;
+        for (auto *action : live.findChildren<QAction *>())
+            if (action->text() == "Previous input")
+                previous = action;
+        check(previous && previous->isEnabled(), "Previous input was not made available");
+        previous->trigger();
+        check(waitUntil([&] { return table->isEnabled(); }), "Previous selection did not complete");
+        check(record.open(QIODevice::ReadOnly), "Previous input command not recorded");
+        check(record.readAll().contains("0xd0"), "Previous input did not select prior accepted input");
+        record.close();
         QString warning;
         auto saved = LoadDesktopConfig(warning);
         check(saved.display == 31 && saved.bus && saved.inputs[0].code == "0xD0",
               "Config roundtrip changed selected target/custom code");
         saved.globalShortcuts = true;
         saved.cycleShortcut = "META+SHIFT+F8";
+        saved.previousShortcut = "META+SHIFT+F10";
         saved.inputs[0].shortcut = "META+SHIFT+F9";
         QString error;
         check(SaveDesktopConfig(saved, error), "Shortcut preferences failed to save");
         const auto shortcutRoundtrip = LoadDesktopConfig(warning);
         check(shortcutRoundtrip.globalShortcuts && shortcutRoundtrip.cycleShortcut == "META+SHIFT+F8" &&
+                  shortcutRoundtrip.previousShortcut == "META+SHIFT+F10" &&
                   shortcutRoundtrip.inputs[0].shortcut == "META+SHIFT+F9",
               "Linux shortcut preferences were lost");
         QTimer::singleShot(0, &live, [&live] { live.close(); });
