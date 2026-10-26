@@ -47,7 +47,7 @@ jobs:
       matrix:
         include:
         - os: ubuntu-latest
-          arch: gcc_64
+          arch: linux_gcc_64
         - os: windows-latest
           arch: win64_msvc2022_64
     runs-on: ${{ matrix.os }}
@@ -77,6 +77,12 @@ jobs:
         New-Item -ItemType Directory -Force desktop-bundle
         Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
         windeployqt --release --no-translations desktop-bundle/LGInputSwitchDesktop.exe
+    - name: Render Windows theme previews
+      if: runner.os == 'Windows'
+      env:
+        QT_QPA_PLATFORM: offscreen
+      shell: pwsh
+      run: '& ./build-desktop/Release/LGInputSwitchDesktop.exe --preview --screenshot-dir build-desktop/previews'
     - name: Upload desktop candidate and previews
       uses: actions/upload-artifact@v4
       with:

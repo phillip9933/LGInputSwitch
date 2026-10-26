@@ -20,9 +20,18 @@ endif()
 
 if(LG_BUILD_DESKTOP)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent)
+    # Qt's Windows entrypoint/runtime uses the dynamic MSVC CRT. Compile the
+    # same portable core with that runtime without changing legacy /MT builds.
+    add_library(lginput_desktop_core core/input_switcher.cpp)
+    if(MSVC)
+        set_property(TARGET lginput_desktop_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
     add_executable(LGInputSwitchDesktop WIN32 desktop/main.cpp desktop/platform.cpp)
     function(lg_configure_desktop target)
-    target_link_libraries(${target} PRIVATE lginput_core Qt6::Widgets Qt6::Concurrent)
+    target_link_libraries(${target} PRIVATE lginput_desktop_core Qt6::Widgets Qt6::Concurrent)
+    if(MSVC)
+        set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    endif()
     if(WIN32)
         target_sources(${target} PRIVATE app/app_config.cpp app/hotkeys.cpp
             amdddc/adl.cpp amdddc/amdddc_core.cpp platform/windows/adl_transport.cpp resource/app.rc)
