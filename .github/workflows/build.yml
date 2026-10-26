@@ -101,7 +101,7 @@ jobs:
       run: pacman -Syu --noconfirm git cmake qt6-base qt6-wayland kglobalaccel ddcutil python desktop-file-utils
     - uses: actions/checkout@v4
     - name: Configure with KDE shortcuts
-      run: cmake -S . -B build-kde -DLG_BUILD_DESKTOP=ON
+      run: cmake -S . -B build-kde -DLG_BUILD_DESKTOP=ON -DLG_REQUIRE_KDE_SHORTCUTS=ON
     - name: Build KDE-enabled desktop
       run: cmake --build build-kde --parallel 2
     - name: Run hardware-free regressions

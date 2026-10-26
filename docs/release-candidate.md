@@ -8,6 +8,12 @@ experimental. Do not describe this candidate as a stable cross-platform release.
 The focused legacy Windows maintenance candidate can ship separately once its
 remaining Windows checks are supplied. No release tag or release has been created.
 
+Local verification at `511ec26561e52cb5887d3690367dd6fde6978b6a` built
+`lginputswitch-1.1.0beta1-1-x86_64.pkg.tar.zst` from the exported source,
+passed all five CTest groups, validated the desktop entry and inspected package
+metadata/linkage. A staged install rendered the GUI without accessing hardware.
+CI additionally builds against a clean Arch container.
+
 ## Linux beta notes
 
 - New Qt desktop app with a scalable tray icon and system/light/dark themes.

@@ -512,9 +512,17 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         palette.setColor(QPalette::ButtonText, QColor(text));
         palette.setColor(QPalette::Highlight, QColor("#3268e8"));
         palette.setColor(QPalette::HighlightedText, Qt::white);
+        palette.setColor(QPalette::Link, QColor(dark ? "#91baff" : "#2458bd"));
+        palette.setColor(QPalette::LinkVisited, QColor(dark ? "#c4a7ff" : "#7040a8"));
         palette.setColor(QPalette::Disabled, QPalette::Text, QColor(muted));
         palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(muted));
         qApp->setPalette(palette);
+        if (auto *license = findChild<QLabel *>("license"))
+            license->setText(
+                QString("LG Input Switch · AGPL-3.0-or-later · "
+                        "<a style=\"color:%1\" href=\"https://github.com/phillip9933/LGInputSwitch\">"
+                        "Source and license</a>")
+                    .arg(dark ? "#91baff" : "#2458bd"));
         qApp->setStyleSheet(
             QString("QWidget{font-size:13px;color:%1;} QWidget#root{background:%2;}"
                     "QFrame#card{background:%3;border:1px solid %4;border-radius:12px;}"
@@ -733,6 +741,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *license =
             new QLabel("LG Input Switch · AGPL-3.0-or-later · "
                        "<a href=\"https://github.com/phillip9933/LGInputSwitch\">Source and license</a>");
+        license->setObjectName("license");
         license->setOpenExternalLinks(true);
         license->setWordWrap(true);
         form->addRow(license);
@@ -919,12 +928,14 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
+    app.setApplicationVersion("1.1.0-beta.1");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
     QCommandLineParser parser;
     parser.setApplicationDescription("LG monitor input switching with a tray and global shortcuts.");
     parser.addHelpOption();
+    parser.addVersionOption();
     parser.addOption({"preview", "Show synthetic data without accessing settings or hardware."});
     parser.addOption({"background", "Start in the tray when a tray host is available."});
     parser.addOption({"screenshot-dir", "Render design previews (requires --preview).", "directory"});

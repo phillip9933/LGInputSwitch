@@ -16,7 +16,7 @@ sha256sums=('@SHA256@')
 build() {
     cmake -S "$srcdir/LGInputSwitch" -B "$srcdir/build" \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
-        -DLG_BUILD_DESKTOP=ON -DCMAKE_DISABLE_FIND_PACKAGE_KF6GlobalAccel=OFF
+        -DLG_BUILD_DESKTOP=ON -DLG_REQUIRE_KDE_SHORTCUTS=ON
     cmake --build "$srcdir/build" --parallel 2
 }
 
@@ -26,6 +26,8 @@ check() {
 }
 
 package() {
+    # Qt binaries can require symbols from the version used at build time.
+    depends[0]="qt6-base>=$(pkg-config --modversion Qt6Core)"
     DESTDIR="$pkgdir" cmake --install "$srcdir/build"
     install -Dm644 "$srcdir/LGInputSwitch/SOURCE_REVISION" \
         "$pkgdir/usr/share/doc/LGInputSwitch/SOURCE_REVISION"

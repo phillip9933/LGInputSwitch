@@ -84,7 +84,7 @@ amdddc_* / adl.* # ADL bridge + raw DDC/CI I²C calls
 app.rc, resource.h, app.ico
 LICENSE
 THIRD_PARTY_LICENSES.md
-ATTRIBUTIONS.md
+COPYRIGHT.md
 
 
 ## Usage Tips
