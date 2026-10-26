@@ -38,13 +38,23 @@ are retained in desktop preferences so they can be re-enabled. Run one Windows
 frontend at a time to avoid duplicate startup/hotkey ownership.
 
 Linux desktop preferences use Qt's per-user config location, separately from the
-Windows JSON and CLI. There is no automatic config migration. Linux global
-shortcuts and autostart are not installed by this increment: bind the CLI through
-your desktop keyboard settings. GNOME requires tray support via an appropriate
+Windows JSON and CLI. There is no automatic config migration. On KDE Plasma, optional KGlobalAccel support lets you enable global shortcuts in
+Preferences, record combinations on Inputs and save. This works while the app is
+running, including with its window hidden. Shortcut registration is off until
+you enable it. Existing shortcuts belonging to other apps or manual Plasma
+commands are reported as conflicts and are never stolen. Shortcuts are released
+while recording and when the app quits.
+
+Other desktops (or builds without KGlobalAccel) retain the desktop-configured CLI
+fallback. Linux autostart is not installed by this increment. GNOME requires tray support via an appropriate
 extension; desktops without a tray can use the window. Tray-host and Wayland
 integration require desktop-specific manual testing.
 
 ## Build
+
+For native KDE shortcuts, also install the KDE Frameworks 6 GlobalAccel development
+package (`kglobalaccel` on CachyOS/Arch). CMake enables the integration when it is
+available; generic Qt builds keep working without it.
 
 Install Qt 6.5+ development packages (Widgets and Concurrent), a C++17 compiler
 and CMake. Windows Visual Studio 2022 requires CMake 3.21+.
@@ -97,3 +107,8 @@ Qt licensing/deployment notices must accompany a stable runtime distribution.
 Implementation, design and tests used substantial Codex AI assistance.
 References: [Qt color scheme](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop),
 [Qt tray support](https://doc.qt.io/qt-6/qsystemtrayicon.html).
+
+Native shortcut registration, readback, cleanup and non-stealing conflict handling
+were tested against the actual CachyOS/Plasma Wayland session using temporary
+actions with no monitor callbacks. Physical key activation remains a user check.
+The probe source is tests/kde_shortcut_probe.cpp.

@@ -109,6 +109,15 @@ int main(int argc, char **argv)
         auto saved = LoadDesktopConfig(warning);
         check(saved.display == 31 && saved.bus && saved.inputs[0].code == "0xD0",
               "Config roundtrip changed selected target/custom code");
+        saved.globalShortcuts = true;
+        saved.cycleShortcut = "META+SHIFT+F8";
+        saved.inputs[0].shortcut = "META+SHIFT+F9";
+        QString error;
+        check(SaveDesktopConfig(saved, error), "Shortcut preferences failed to save");
+        const auto shortcutRoundtrip = LoadDesktopConfig(warning);
+        check(shortcutRoundtrip.globalShortcuts && shortcutRoundtrip.cycleShortcut == "META+SHIFT+F8" &&
+                  shortcutRoundtrip.inputs[0].shortcut == "META+SHIFT+F9",
+              "Linux shortcut preferences were lost");
         QTimer::singleShot(0, &live, [&live] { live.close(); });
         QTimer::singleShot(3000, &app, [&app] { app.exit(91); });
         check(app.exec() == 0, "Closing without a tray failed to quit");

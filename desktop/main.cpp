@@ -1,4 +1,5 @@
 #include "../core/input_value.h"
+#include "kde_shortcuts.h"
 #include "platform.h"
 #include <QtConcurrent>
 #include <QtWidgets>
@@ -39,6 +40,9 @@ static QIcon MonitorIcon()
 class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 {
     DesktopConfig config_;
+    KdeShortcuts kdeShortcuts_;
+    const bool kdeAvailable_ = KdeShortcuts::available();
+    QCheckBox *globalShortcuts_;
     bool preview_, busy_ = false, dirty_ = false, quitting_ = false;
     int position_ = -1;
     QThreadPool worker_;
@@ -105,6 +109,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         c.appearance = appearance_->currentData().toString();
         c.notifications = notifications_->isChecked();
         c.startup = startup_->isChecked();
+        c.globalShortcuts = globalShortcuts_->isChecked();
         c.cycleShortcut = cycleShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
         int selected = monitors_->currentIndex();
         if (selected >= 0 && selected < detected_.size())
@@ -132,11 +137,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             auto *shortcut =
                 new QKeySequenceEdit(QKeySequence::fromString(row.shortcut, QKeySequence::PortableText));
             shortcut->setMaximumSequenceLength(1);
-#ifdef Q_OS_WIN
             connect(shortcut, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
-#else
-            shortcut->setEnabled(false);
-            shortcut->setToolTip("Configure global shortcuts in your desktop's keyboard settings.");
+#ifndef Q_OS_WIN
+            shortcut->setEnabled(kdeAvailable_ && globalShortcuts_->isChecked());
 #endif
             table_->setCellWidget(i, 3, shortcut);
             auto *send = new QPushButton("Switch");
@@ -258,6 +261,31 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         if (failed)
             message(
                 "Some shortcuts are invalid or in use by another app. Choose different shortcuts and save.");
+#else
+        kdeShortcuts_.clear();
+        if (!kdeAvailable_ || !config_.globalShortcuts)
+            return;
+        QStringList failed;
+        auto bind = [&](const QString &id, const QString &label, const QString &text, int index) {
+            const auto key = QKeySequence::fromString(text, QKeySequence::PortableText);
+            if (!kdeShortcuts_.bind(id, label, key, [this, index] { sendInput(index); }))
+                failed.push_back(label);
+        };
+        bind("cycle", "Cycle inputs", config_.cycleShortcut, -1);
+        for (int i = 0; i < config_.inputs.size(); ++i)
+            if (config_.inputs[i].enabled)
+            {
+                const auto &row = config_.inputs[i];
+                const auto id =
+                    "input-" +
+                    QString::fromLatin1(
+                        QCryptographicHash::hash(row.label.toUtf8(), QCryptographicHash::Sha256).toHex());
+                bind(id, "Switch to " + row.label, row.shortcut, i);
+            }
+        if (!failed.isEmpty())
+            message("Shortcut unavailable: " + failed.join(", ") +
+                    ". Choose another combination, or remove your earlier manual Plasma shortcut. Existing "
+                    "bindings were not changed.");
 #endif
     }
     void sendInput(int index)
@@ -581,18 +609,37 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             new QKeySequenceEdit(QKeySequence::fromString(config_.cycleShortcut, QKeySequence::PortableText));
         cycleShortcut_->setParent(preferences);
         cycleShortcut_->setMaximumSequenceLength(1);
+        globalShortcuts_ = new QCheckBox("Enable global shortcuts while the app is running", preferences);
+        globalShortcuts_->setObjectName("globalShortcuts");
+        globalShortcuts_->setChecked(config_.globalShortcuts);
 #ifdef Q_OS_WIN
+        globalShortcuts_->hide();
         form->addRow("Startup", startup_);
         form->addRow("Cycle shortcut", cycleShortcut_);
 #else
         startup_->hide();
-        cycleShortcut_->hide();
-        auto *shortcutHelp =
-            new QLabel("Global shortcuts are managed by your Linux desktop. Bind the lginputswitch CLI in "
-                       "keyboard settings. Tray actions work without a global shortcut.");
-        shortcutHelp->setWordWrap(true);
-        form->addRow("Linux shortcuts", shortcutHelp);
-        table_->hideColumn(3);
+        if (kdeAvailable_)
+        {
+            form->addRow("Global shortcuts", globalShortcuts_);
+            form->addRow("Cycle shortcut", cycleShortcut_);
+            cycleShortcut_->setEnabled(config_.globalShortcuts);
+            auto *help =
+                new QLabel("Enable shortcuts, record combinations on Inputs, then save. Plasma handles them "
+                           "even when this window is hidden. Existing shortcut conflicts are reported.");
+            help->setWordWrap(true);
+            form->addRow(help);
+        }
+        else
+        {
+            globalShortcuts_->hide();
+            cycleShortcut_->hide();
+            table_->hideColumn(3);
+            auto *help =
+                new QLabel("Native global shortcuts require KDE Plasma and the optional KGlobalAccel "
+                           "integration. Otherwise bind the CLI in desktop keyboard settings.");
+            help->setWordWrap(true);
+            form->addRow("Linux shortcuts", help);
+        }
 #endif
         tabs->addTab(preferences, "Preferences");
         auto *advanced = new QFrame;
@@ -679,7 +726,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         connect(notifications_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(startup_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(cycleShortcut_, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
-#ifdef Q_OS_WIN
+        connect(globalShortcuts_, &QCheckBox::toggled, this, [this](bool enabled) {
+#ifndef Q_OS_WIN
+            cycleShortcut_->setEnabled(enabled && kdeAvailable_);
+            for (int i = 0; i < table_->rowCount(); ++i)
+                table_->cellWidget(i, 3)->setEnabled(enabled && kdeAvailable_);
+#endif
+            dirty();
+        });
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *current) {
             bool capture = false;
             for (auto *widget = current; widget; widget = widget->parentWidget())
@@ -690,14 +744,17 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 }
             if (capture)
             {
+#ifdef Q_OS_WIN
                 for (const auto &item : hotkeys_)
                     UnregisterHotKey(nullptr, item.first);
                 hotkeys_.clear();
+#else
+                if(!preview_)kdeShortcuts_.clear();
+#endif
             }
             else if (!preview_)
                 registerHotkeys();
         });
-#endif
         qApp->installNativeEventFilter(this);
         theme();
         rebuildMenu();

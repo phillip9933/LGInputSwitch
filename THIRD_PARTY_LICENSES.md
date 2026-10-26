@@ -27,3 +27,8 @@ This project incorporates or was inspired by the following:
 - The modern desktop frontend dynamically links Qt Widgets, GUI, Core and Concurrent.
 - Qt is available under commercial and open-source licenses; see https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licenses.html .
 - Qt source is not vendored here. Include applicable Qt/runtime notices and satisfy redistribution obligations when packaging desktop builds. The legacy Windows executable and Linux CLI do not depend on Qt.
+
+## KDE Frameworks KGlobalAccel (optional KDE shortcuts)
+- Dynamically linked when available; no source is vendored.
+- Configurable global shortcuts for KDE Plasma: https://api.kde.org/kglobalaccel.html .
+- Preserve applicable KDE Frameworks license notices when packaging this dependency.

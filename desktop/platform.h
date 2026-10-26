@@ -14,7 +14,7 @@ struct DesktopConfig
                                  {"HDMI2", "0x91", "CTRL+ALT+5", true}};
     QString source = "0x50", cycleShortcut = "CTRL+ALT+1", appearance = "system";
     int adapter = -1, display = -1, debounce = 750;
-    bool bus = false, notifications = true, startup = false;
+    bool bus = false, notifications = true, startup = false, globalShortcuts = false;
 };
 struct DesktopMonitor
 {

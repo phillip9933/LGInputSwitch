@@ -92,3 +92,17 @@ jobs:
           build-desktop/LGInputSwitchDesktop
           build-desktop/previews/
           docs/desktop-ui.md
+  desktop-kde:
+    name: KDE desktop integration
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+    - name: Install distro Qt and KDE development dependencies
+      run: pacman -Syu --noconfirm git cmake qt6-base kglobalaccel python
+    - uses: actions/checkout@v4
+    - name: Configure with KDE shortcuts
+      run: cmake -S . -B build-kde -DLG_BUILD_DESKTOP=ON
+    - name: Build KDE-enabled desktop
+      run: cmake --build build-kde --parallel 2
+    - name: Run hardware-free regressions
+      run: ctest --test-dir build-kde --output-on-failure

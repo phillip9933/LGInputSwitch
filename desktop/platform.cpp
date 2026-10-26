@@ -54,6 +54,8 @@ DesktopConfig LoadDesktopConfig(QString &warning)
     c.notifications = legacy.showNotifications;
     c.startup = legacy.startWithWindows;
 #else
+    c.globalShortcuts = prefs.value("globalShortcuts", false).toBool();
+    c.cycleShortcut = prefs.value("cycleShortcut", c.cycleShortcut).toString();
     c.display = prefs.value("target", -1).toInt();
     c.bus = prefs.value("bus", true).toBool();
     c.source = prefs.value("source", c.source).toString();
@@ -70,8 +72,8 @@ DesktopConfig LoadDesktopConfig(QString &warning)
             for (auto item : doc.array())
             {
                 auto row = item.toObject();
-                c.inputs.push_back(
-                    {row["label"].toString(), row["code"].toString(), {}, row["enabled"].toBool()});
+                c.inputs.push_back({row["label"].toString(), row["code"].toString(),
+                                    row["shortcut"].toString(), row["enabled"].toBool()});
             }
         }
         else
@@ -122,6 +124,8 @@ bool SaveDesktopConfig(const DesktopConfig &c, QString &error)
     QSettings prefs;
     prefs.setValue("inputs", QJsonDocument(inputs).toJson(QJsonDocument::Compact));
 #ifndef Q_OS_WIN
+    prefs.setValue("globalShortcuts", c.globalShortcuts);
+    prefs.setValue("cycleShortcut", c.cycleShortcut);
     prefs.setValue("target", c.display);
     prefs.setValue("bus", c.bus);
     prefs.setValue("source", c.source);
