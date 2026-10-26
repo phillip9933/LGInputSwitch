@@ -40,3 +40,49 @@ jobs:
       with:
         name: LGInputSwitch-Linux-CLI-experimental
         path: build-tests/lginputswitch
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-latest
+          arch: gcc_64
+        - os: windows-latest
+          arch: win64_msvc2022_64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.8.3'
+        arch: ${{ matrix.arch }}
+        cache: true
+    - name: Configure desktop
+      run: cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON
+    - name: Build desktop and regression tests
+      run: cmake --build build-desktop --config Release --parallel 2
+    - name: Test desktop and backends
+      run: ctest --test-dir build-desktop -C Release --output-on-failure
+    - name: Render Linux theme previews
+      if: runner.os == 'Linux'
+      env:
+        QT_QPA_PLATFORM: offscreen
+      run: ./build-desktop/LGInputSwitchDesktop --preview --screenshot-dir build-desktop/previews
+    - name: Deploy Windows Qt runtime
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force desktop-bundle
+        Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
+        windeployqt --release --no-translations desktop-bundle/LGInputSwitchDesktop.exe
+    - name: Upload desktop candidate and previews
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-Desktop-${{ runner.os }}-experimental
+        path: |
+          desktop-bundle/
+          build-desktop/LGInputSwitchDesktop
+          build-desktop/previews/
+          docs/desktop-ui.md

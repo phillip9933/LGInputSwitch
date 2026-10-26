@@ -22,3 +22,8 @@ This project incorporates or was inspired by the following:
 - ddcutil documentation/wiki
 - General DDC/CI notes (e.g., VCP codes, timing)
 - Used for reference; no source code copied.
+
+## Qt 6 (optional desktop frontend)
+- The modern desktop frontend dynamically links Qt Widgets, GUI, Core and Concurrent.
+- Qt is available under commercial and open-source licenses; see https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licenses.html .
+- Qt source is not vendored here. Include applicable Qt/runtime notices and satisfy redistribution obligations when packaging desktop builds. The legacy Windows executable and Linux CLI do not depend on Qt.

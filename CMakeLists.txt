@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
+option(LG_BUILD_DESKTOP "Build the modern Qt desktop frontend" OFF)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -15,6 +16,40 @@ target_include_directories(lginput_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 
 if(WIN32)
     enable_language(RC)
+endif()
+
+if(LG_BUILD_DESKTOP)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent)
+    add_executable(LGInputSwitchDesktop WIN32 desktop/main.cpp desktop/platform.cpp)
+    function(lg_configure_desktop target)
+    target_link_libraries(${target} PRIVATE lginput_core Qt6::Widgets Qt6::Concurrent)
+    if(WIN32)
+        target_sources(${target} PRIVATE app/app_config.cpp app/hotkeys.cpp
+            amdddc/adl.cpp amdddc/amdddc_core.cpp platform/windows/adl_transport.cpp resource/app.rc)
+        target_include_directories(${target} PRIVATE app amdddc adl-sdk/include resource)
+        target_compile_definitions(${target} PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(${target} PRIVATE user32 shell32 advapi32 gdi32)
+    else()
+        target_sources(${target} PRIVATE platform/linux/ddcutil_backend.cpp)
+
+    endif()
+    endfunction()
+    lg_configure_desktop(LGInputSwitchDesktop)
+    if(NOT WIN32)
+        install(TARGETS LGInputSwitchDesktop RUNTIME DESTINATION bin)
+        install(FILES desktop/lginputswitch.desktop DESTINATION share/applications)
+        install(FILES desktop/lginputswitch.svg DESTINATION share/icons/hicolor/scalable/apps)
+    endif()
+    if(BUILD_TESTING)
+        add_executable(desktop_smoke tests/desktop_smoke.cpp desktop/platform.cpp)
+        lg_configure_desktop(desktop_smoke)
+        add_test(NAME desktop-smoke COMMAND desktop_smoke)
+        set_tests_properties(desktop-smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()
+
+
+if(WIN32)
     add_executable(LGInputSwitch WIN32
         app/main.cpp app/app_tray.cpp app/app_config.cpp app/app_toggle.cpp
         app/hotkeys.cpp app/settings_ui.cpp app/welcome_ui.cpp

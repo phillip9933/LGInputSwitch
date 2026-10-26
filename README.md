@@ -110,3 +110,14 @@ See [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md) and [ATTRIBUTIONS.md](.
 
 ## Disclaimer
 This project is not affiliated with AMD or LG. Use at your own risk.
+
+## Modern desktop preview (Windows and Linux)
+
+An optional shared tray/settings frontend adds a refreshed layout, scalable monitor
+icon, shortcut recording on Windows, asynchronous monitor operations and system,
+light and dark appearance modes. Build with Qt 6.5+ using
+`cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON`, then
+`cmake --build build-desktop --config Release`. See [desktop setup, preview and
+limitations](docs/desktop-ui.md). The Linux GUI uses ddcutil; desktop-managed
+shortcuts are the current fallback on Linux. Real OS theme/tray and hardware
+validation is required before replacing the existing Windows frontend.

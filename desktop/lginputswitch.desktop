@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=LG Input Switch
+Comment=Switch LG monitor inputs from your desktop
+Exec=LGInputSwitchDesktop
+Icon=lginputswitch
+Terminal=false
+Categories=Utility;Settings;
