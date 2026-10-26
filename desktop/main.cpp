@@ -39,7 +39,7 @@ static QIcon MonitorIcon()
 class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 {
     DesktopConfig config_;
-    bool preview_, busy_ = false, dirty_ = false;
+    bool preview_, busy_ = false, dirty_ = false, quitting_ = false;
     int position_ = -1;
     QThreadPool worker_;
     QSystemTrayIcon *tray_;
@@ -380,6 +380,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         if (dirty_ && QMessageBox::question(this, "Unsaved changes", "Quit without saving your changes?") !=
                           QMessageBox::Yes)
             return;
+        quitting_ = true;
         qApp->quit();
     }
     void theme()
@@ -433,7 +434,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
   protected:
     void closeEvent(QCloseEvent *event) override
     {
-        if (preview_)
+        if (preview_ || quitting_)
         {
             event->accept();
             return;
@@ -574,10 +575,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         notifications_ = new QCheckBox("Show command notifications");
         notifications_->setChecked(config_.notifications);
         form->addRow("Notifications", notifications_);
-        startup_ = new QCheckBox("Launch when I sign in to Windows");
+        startup_ = new QCheckBox("Launch when I sign in to Windows", preferences);
         startup_->setChecked(config_.startup);
         cycleShortcut_ =
             new QKeySequenceEdit(QKeySequence::fromString(config_.cycleShortcut, QKeySequence::PortableText));
+        cycleShortcut_->setParent(preferences);
         cycleShortcut_->setMaximumSequenceLength(1);
 #ifdef Q_OS_WIN
         form->addRow("Startup", startup_);

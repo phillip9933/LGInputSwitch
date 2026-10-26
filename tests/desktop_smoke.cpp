@@ -29,6 +29,7 @@ int main(int argc, char **argv)
     app.setOrganizationName("LGInputSwitchTests");
     app.setApplicationName("Desktop");
     app.setStyle("Fusion");
+    app.setQuitOnLastWindowClosed(false);
     QTemporaryDir temporary;
     check(temporary.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temporary.path());
@@ -104,6 +105,9 @@ int main(int argc, char **argv)
         auto saved = LoadDesktopConfig(warning);
         check(saved.display == 6 && saved.bus && saved.inputs[0].code == "0xD0",
               "Config roundtrip changed selected target/custom code");
+        QTimer::singleShot(0, &live, [&live] { live.close(); });
+        QTimer::singleShot(3000, &app, [&app] { app.exit(91); });
+        check(app.exec() == 0, "Closing without a tray failed to quit");
     }
 #endif
     std::cout << "Desktop theme, preview, layout and platform smoke checks passed\n";
