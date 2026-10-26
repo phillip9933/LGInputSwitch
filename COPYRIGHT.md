@@ -17,5 +17,7 @@ No third-party code is relicensed by this change.
 
 When distributing binaries, provide the corresponding source for the exact build,
 including build and packaging scripts, under the applicable license terms. The
-candidate packaging workflow includes a source archive with every binary bundle.
+Linux candidate packaging workflow includes its corresponding source archive. The
+Windows CI artifacts still need a complete release source/notice bundle; see
+[Windows licensing audit](docs/windows-licensing.md).
 Repository: https://github.com/phillip9933/LGInputSwitch

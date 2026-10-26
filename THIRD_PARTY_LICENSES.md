@@ -9,15 +9,20 @@ This project incorporates or was inspired by the following:
 - AMD driver runtime DLLs are loaded from the installed driver and are not bundled.
 
 ## nlohmann/json
-- License: MIT
-- Source: https://github.com/nlohmann/json
-- License text: https://json.nlohmann.me/home/license/
+- License: MIT (bundled version 3.12.0); full text: `licenses/nlohmann-json-MIT.txt`.
+- Source: https://github.com/nlohmann/json/tree/v3.12.0
+- Preserve embedded attribution: Niels Lohmann, Björn Hoehrmann, Florian Loitsch,
+  the Abseil Authors, and Hedley/Evan Nemerson (CC0-1.0 in upstream documentation).
+- Version-specific terms: https://github.com/nlohmann/json/blob/v3.12.0/docs/mkdocs/docs/home/license.md
 
 ## amildahl/amdddc-windows
 - License: No explicit license file was found at time of writing.
 - Source: https://github.com/amildahl/amdddc-windows
-- Notes: Original CLI that demonstrated AMD + LG input switching over alternate I²C.
-  This project rewraps the idea with a tray UI, hotkeys, and config.
+- Original CLI/source adapted for the Windows AMD backend.
+- Written no-objection evidence: the owner replied to the maintainer’s reuse notice
+  on 19 November 2025: https://github.com/amildahl/amdddc-windows/issues/3#issuecomment-3554891167 .
+- This is permission context, not a named MIT/AGPL grant. The scope for the new
+  AGPL distribution remains to be clarified; preserve upstream attribution.
 
 ## DDC/CI references (documentation only)
 - ddcutil documentation/wiki
@@ -36,3 +41,10 @@ This project incorporates or was inspired by the following:
 
 The project AGPL license does not relicense any of these dependencies.
 The Linux binary links distribution-provided Qt/KDE; those runtimes are not bundled.
+
+## Windows release inventory
+
+See [Windows redistribution audit](docs/windows-licensing.md) for the inspected
+Windows artifact, exact DLL inventory, upstream permission evidence and remaining
+Qt/Mesa/Microsoft notice/source/runtime packaging work. The CI artifact is not
+yet a license-complete Windows release bundle.

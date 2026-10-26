@@ -71,10 +71,12 @@ Before publishing the Linux beta:
 - Use the beta notes above and make the release a prerelease. No Linux package or
   key is signed yet; checksums detect corruption, not publisher identity.
 
-Before publishing Windows binaries, resolve the pre-existing upstream provenance
-question for adapted amildahl/amdddc-windows code: no explicit upstream license
-was found during review. Retain all existing attribution; do not claim that the
-maintainer's license change grants rights to third-party code. The bundled AMD
+Before publishing Windows binaries, resolve the scope of the upstream permission
+for adapted amildahl/amdddc-windows code. The owner’s written no-objection reply
+to this maintainer’s reuse notice has now been found; it does not specify a
+standard license or new AGPL distribution terms. See the evidence and complete
+artifact inventory in [windows-licensing.md](windows-licensing.md). Retain
+attribution and do not infer third-party relicensing rights from the project’s license change. The bundled AMD
 SDK headers themselves carry MIT notices (corrected from the old EULA claim).
 The Linux source package excludes that inherited Windows implementation, which
 is neither compiled nor needed on Linux. The Windows Qt runtime also needs its complete applicable dependency notices
