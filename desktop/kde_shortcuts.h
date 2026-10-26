@@ -17,7 +17,11 @@ class KdeShortcuts
     QString component_;
 
   public:
-    explicit KdeShortcuts(QString component = "lginputswitch.desktop") : component_(std::move(component))
+    static QString applicationComponent()
+    {
+        return QStringLiteral("lginputswitch");
+    }
+    explicit KdeShortcuts(QString component = applicationComponent()) : component_(std::move(component))
     {
     }
     static bool available()
@@ -91,10 +95,10 @@ class KdeShortcuts
 #endif
         actions_.clear();
     }
-    static void pruneInactive()
+    void pruneInactive()
     {
 #ifdef LG_HAVE_KGLOBALACCEL
-        KGlobalAccel::cleanComponent("lginputswitch.desktop");
+        KGlobalAccel::cleanComponent(component_);
 #endif
     }
     ~KdeShortcuts()

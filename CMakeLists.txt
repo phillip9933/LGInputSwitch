@@ -64,6 +64,12 @@ if(LG_BUILD_DESKTOP)
         lg_configure_desktop(desktop_smoke)
         add_test(NAME desktop-smoke COMMAND desktop_smoke)
         set_tests_properties(desktop-smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        if(TARGET KF6::GlobalAccel)
+            # Manual live-session probe: registers only an isolated test
+            # component and uses a fake monitor backend. No hardware writes.
+            add_executable(kde_window_probe tests/kde_window_probe.cpp desktop/platform.cpp)
+            lg_configure_desktop(kde_window_probe)
+        endif()
     endif()
 endif()
 

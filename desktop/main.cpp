@@ -40,6 +40,9 @@ static QIcon MonitorIcon()
 
 class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 {
+#ifdef LG_DESKTOP_TEST
+    friend struct DesktopWindowProbe;
+#endif
     DesktopConfig config_;
     KdeShortcuts kdeShortcuts_;
     const bool kdeAvailable_ = KdeShortcuts::available();
@@ -298,16 +301,22 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         if (failed)
             message("Some shortcuts are invalid or in use. Choose different shortcuts and save.");
 #else
+        if (qEnvironmentVariableIsSet("LG_INPUT_SWITCH_DEBUG"))
+            qInfo() << "KDE shortcut startup:" << "preview" << preview_ << "available" << kdeAvailable_
+                    << "enabled" << config_.globalShortcuts << "apply" << applyEdits;
         kdeShortcuts_.clear();
         if (!kdeAvailable_)
             return;
         QStringList failed;
         auto bind = [&](const QString &id, const QString &label, const QString &text, int index) {
             const auto key = QKeySequence::fromString(text, QKeySequence::PortableText);
-            if (!kdeShortcuts_.bind(
-                    id, label, key, [this, index] { sendInput(index); },
-                    [this, index](const QKeySequence &actual) { syncShortcut(index, actual); }, applyEdits,
-                    config_.globalShortcuts))
+            const bool accepted = kdeShortcuts_.bind(
+                id, label, key, [this, index] { sendInput(index); },
+                [this, index](const QKeySequence &actual) { syncShortcut(index, actual); }, applyEdits,
+                config_.globalShortcuts);
+            if (qEnvironmentVariableIsSet("LG_INPUT_SWITCH_DEBUG"))
+                qInfo() << "KDE action" << id << "accepted" << accepted;
+            if (!accepted)
                 failed.push_back(label);
         };
         bind("cycle", "Cycle inputs", config_.cycleShortcut, -1);
@@ -325,7 +334,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         // All current catalogue actions now exist; remove obsolete disabled or
         // renamed input actions from this application's component only.
         if (config_.globalShortcuts && failed.isEmpty())
-            KdeShortcuts::pruneInactive();
+            kdeShortcuts_.pruneInactive();
         if (!failed.isEmpty())
             message("Shortcut unavailable: " + failed.join(", ") + ". Existing assignments were not stolen.");
 #endif
@@ -561,7 +570,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
 
   public:
-    explicit DesktopWindow(bool preview) : preview_(preview)
+    explicit DesktopWindow(bool preview, const QString &component = KdeShortcuts::applicationComponent())
+        : kdeShortcuts_(component), preview_(preview)
     {
         QString warning;
         if (!preview)
@@ -849,6 +859,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
     ~DesktopWindow() override
     {
+        qApp->removeNativeEventFilter(this);
+        QObject::disconnect(qApp, nullptr, this, nullptr);
+        QObject::disconnect(qApp->styleHints(), nullptr, this, nullptr);
 #ifdef Q_OS_WIN
         for (const auto &item : hotkeys_)
             UnregisterHotKey(nullptr, item.first);

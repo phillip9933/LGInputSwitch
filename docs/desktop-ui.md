@@ -118,7 +118,7 @@ The probe source is tests/kde_shortcut_probe.cpp.
 
 ## Linked shortcut action catalogue
 
-The application component matches `lginputswitch.desktop`, with a catalogue of:
+The native component `lginputswitch` resolves to the installed `lginputswitch.desktop` launcher, with a catalogue of:
 Cycle inputs, Previous input, and Switch to each enabled input. Actions with no
 key assigned remain visible for configuration. Disabling/renaming inputs removes
 obsolete actions when the active catalogue is refreshed. The earlier manually
@@ -135,3 +135,9 @@ The native probe uses a separate configuration process to verify Plasma-to-app
 change signals, persistence/reload, app-to-Plasma writes and conflict handling.
 All probe callbacks are hardware-free. GUI smoke tests verify previous-input
 routing against a fake backend. No physical switch is sent by automated tests.
+
+Native shortcut components deliberately omit the `.desktop` suffix. On Plasma,
+using the launcher-service ID makes component cleanup remove dynamic actions.
+A native-component/launcher-service comparison reproduced this failure; the
+window-level probe also covers registration after construction, discovery and
+focus events with isolated preferences and a fake monitor backend.
