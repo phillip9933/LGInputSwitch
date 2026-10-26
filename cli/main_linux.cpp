@@ -3,7 +3,6 @@
 #include "../external/json.hpp"
 #include <iostream>
 #include <limits>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -20,12 +19,6 @@ static void Usage() {
 static int Error(const std::string& message) {
     std::cerr << message << '\n';
     return 2;
-}
-
-static std::string Hex(unsigned int value) {
-    std::ostringstream text;
-    text << "0x" << std::hex << value;
-    return text.str();
 }
 
 int main(int argc, char** argv) {
@@ -69,23 +62,29 @@ int main(int argc, char** argv) {
     }
 
     std::vector<std::string> arguments{"ddcutil"};
+    DdcutilTransport transport(selector, target);
+    const lg::InputCommand inputCommand{source, 0xf4, input};
     if (command == "detect") arguments.push_back("detect");
     else {
         if (selector.empty() || !hasInput) return Error("switch requires a target and --input. Use --help.");
-        // Prefix all protocol values explicitly; ddcutil's source option is hexadecimal.
-        arguments.insert(arguments.end(), {selector, std::to_string(target), "setvcp", "0xf4",
-            Hex(input), "--i2c-source-addr=" + Hex(source), "--noverify"});
+        arguments = transport.Arguments(inputCommand);
+        if (arguments.empty()) return Error("Invalid Linux target or LG input command.");
     }
     if (dryRun) {
         std::cout << nlohmann::json(arguments).dump() << '\n';
         return 0;
     }
-    const auto result = RunDdcutil(arguments);
-    if (!result.error.empty()) std::cerr << result.error << '\n';
-    if (result.exitCode != 0) {
-        std::cerr << "ddcutil failed (status " << result.exitCode << "). Check its output, target, cable path and I2C permissions.\n";
+    lg::SwitchResult result{lg::SwitchStatus::CommandSent, 0, {}};
+    if (command == "detect") {
+        const auto child = RunDdcutil(arguments);
+        result = {child.exitCode == 0 ? lg::SwitchStatus::CommandSent : lg::SwitchStatus::TransportFailure,
+            child.exitCode, child.error};
+    } else result = transport.Send(inputCommand);
+    if (!result.sent()) {
+        if (!result.detail.empty()) std::cerr << result.detail << '\n';
+        std::cerr << "ddcutil failed (status " << result.nativeCode << "). Check its output, target, cable path and I2C permissions.\n";
     } else if (command == "switch") {
-        std::cout << "Input command sent; monitor switching was not verified.\n";
+        std::cout << result.detail << '\n';
     }
-    return result.exitCode;
+    return result.nativeCode;
 }

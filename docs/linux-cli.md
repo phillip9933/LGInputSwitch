@@ -19,7 +19,7 @@ ctest --test-dir build --output-on-failure
 To compile the CLI directly without CMake:
 
 ```
-g++ -std=c++17 cli/main_linux.cpp platform/linux/ddcutil_backend.cpp -o lginputswitch
+g++ -std=c++17 cli/main_linux.cpp platform/linux/ddcutil_backend.cpp core/input_switcher.cpp -o lginputswitch
 python3 tests/linux_cli.py ./lginputswitch
 ```
 

@@ -37,6 +37,12 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 
 Hardware-free regression tests: `cmake -S . -B build-tests`, `cmake --build build-tests --config Release`, then `ctest --test-dir build-tests -C Release --output-on-failure`. The Windows startup test writes and removes this app's per-user Run entry; run it in an isolated test account/CI runner.
 
+CMake also builds the native Windows tray app with Visual Studio 2022 (CMake
+3.21+): `cmake -S . -B build -A x64`, then
+`cmake --build build --config Release`. The existing solution remains supported;
+CI builds it and the CMake application target. Both frontends share a portable
+C++17 library for command validation, input ordering, cycle state and results.
+
 See [code review and verification](docs/maintenance-review.md) and the [cross-platform architecture proposal](docs/cross-platform-design.md).
 
 ## Linux CLI (experimental)

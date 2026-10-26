@@ -36,6 +36,18 @@ known. Stable publication depends on verification, not elapsed time.
 
 ## Boundaries
 
+The first extraction implements `core/input_switcher.*`: typed commands/results,
+target-bound `InputTransport`, validation, ordering and cycle state. Windows wraps
+the existing ADL bridge in `platform/windows/adl_transport.*`; Linux implements
+the same interface through ddcutil. Core regression tests compile without Win32,
+ADL or process APIs. CMake builds the full Windows app as well as the Linux CLI,
+alongside the original Visual Studio solution.
+
+Discovery and OS services remain separate frontend/backend code in this increment.
+The Windows JSON schema/location are unchanged; no migration is performed. Stable
+display identity, structured Linux discovery and full config extraction remain
+under #10. The transport interface can grow to support these after validation.
+
 Keep C++17 initially; the working Windows ADL bridge and protocol need no language
 rewrite. CMake supplies a portable build alongside the existing Visual Studio
 solution until parity is proven. Separate these concerns:

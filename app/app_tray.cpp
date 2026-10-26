@@ -93,38 +93,11 @@ static void RegisterHK(HWND hwnd) {
 }
 
 static std::vector<InputDef> OrderedInputs() {
-    // Build map of enabled inputs
-    std::map<std::string, const InputDef*> enabled;
-    for (auto& in : g_cfg.inputs) enabled[in.label] = &in;
-
-    std::vector<InputDef> out;
-    std::set<std::string> used;
-
-    // 1) take items from cycleOrder that are enabled
-    for (auto& name : g_cfg.cycleOrder) {
-        auto it = enabled.find(name);
-        if (it != enabled.end() && !used.count(name)) {
-            out.push_back(*it->second);
-            used.insert(name);
-        }
-    }
-    // 2) append remaining enabled inputs
-    for (auto& kv : enabled) {
-        if (!used.count(kv.first)) out.push_back(*kv.second);
-    }
-    // fallback
-    if (out.empty()) {
-        for (auto& in : g_cfg.inputs) out.push_back(in);
-    }
-    return out;
+    return lg::OrderInputs(g_cfg.inputs, g_cfg.cycleOrder);
 }
 
 static void RememberInput(const std::string& label) {
-    auto ordered = OrderedInputs();
-    g_cycleIndex = -1;
-    for (size_t i = 0; i < ordered.size(); ++i) {
-        if (ordered[i].label == label) { g_cycleIndex = (int)i; break; }
-    }
+    g_cycleIndex = lg::InputPosition(OrderedInputs(), label);
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
