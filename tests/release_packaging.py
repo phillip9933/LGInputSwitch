@@ -42,14 +42,21 @@ class ReleasePackaging(unittest.TestCase):
                     hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n'
                     for path in directory.iterdir()))
             calls = []
+            created = False
             def fake_run(*args):
+                nonlocal created
                 calls.append(args)
                 if args[0] == 'git':
                     return 'fixture\n'
                 if args[:2] == ('gh', 'api'):
-                    return json.dumps({'assets': [
+                    self.assertNotIn('/tags/', args[-1])
+                    if not created:
+                        return '[[]]'
+                    return json.dumps([[{'tag_name':'1.1.0', 'draft':True, 'target_commitish':'fixture', 'assets': [
                         {'name': path.name, 'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()}
-                        for path in (root / 'publish').iterdir()]})
+                        for path in (root / 'publish').iterdir()]}]])
+                if args[:3] == ('gh', 'release', 'create'):
+                    created = True
                 return '{}'
             class MissingRelease:
                 returncode = 1
@@ -105,6 +112,8 @@ class ReleasePackaging(unittest.TestCase):
             (root / 'windows/app.zip').write_bytes(b'incorrect')
             (root / 'windows/SHA256SUMS-Windows').write_text('0'*64 + '  app.zip\n')
             def git_only(*args):
+                if args[:2] == ('gh', 'api'):
+                    return '[[]]'
                 self.assertEqual(args, ('git', 'rev-parse', 'HEAD'))
                 return 'fixture\n'
             class MissingRelease:

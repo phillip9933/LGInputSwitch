@@ -15,6 +15,13 @@ def run(*args):
     return subprocess.check_output(args, cwd=ROOT, text=True)
 
 
+def find_release(repository, version):
+    # Draft releases do not resolve through the public /releases/tags endpoint.
+    pages = json.loads(run('gh', 'api', '--paginate', '--slurp', f'repos/{repository}/releases'))
+    return next((release for page in pages for release in page
+                 if release['tag_name'] == version), None)
+
+
 def validate():
     version = os.environ['RELEASE_VERSION']
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
@@ -33,8 +40,7 @@ def publish(assets, version):
     if revision != os.environ['GITHUB_SHA']:
         raise ValueError('Checkout differs from tested workflow revision')
     repository = os.environ['GITHUB_REPOSITORY']
-    if subprocess.run(['gh', 'release', 'view', version, '--repo', repository],
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+    if find_release(repository, version) is not None:
         raise ValueError('A release with this version already exists; never overwrite published builds')
     output = assets / 'publish'
     output.mkdir()
@@ -72,7 +78,9 @@ def publish(assets, version):
     run('gh', 'release', 'create', version, '--repo', repository, '--draft', '--target', revision,
         '--title', 'LG Input Switch ' + version, '--notes-file', str(ROOT / f'docs/releases/{version}.md'),
         *map(str, files))
-    release = json.loads(run('gh', 'api', f'repos/{repository}/releases/tags/{version}'))
+    release = find_release(repository, version)
+    if release is None or not release['draft'] or release['target_commitish'] != revision:
+        raise ValueError('Uploaded draft release does not match tested revision')
     remote = {entry['name']: entry.get('digest') for entry in release['assets']}
     for path in files:
         if remote.get(path.name) != 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest():
