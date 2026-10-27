@@ -1,4 +1,4 @@
-# Linux beta installation
+# Linux installation
 
 The first supported test environment is CachyOS with KDE Plasma 6 on Wayland.
 The maintainer has verified discovery, input switching, tray/settings and linked
@@ -8,9 +8,9 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-Candidate CI artifacts contain a native `.pkg.tar.zst` package, its corresponding
-source archive, PKGBUILD, source revision and SHA256SUMS. Download the artifact
-named `LGInputSwitch-CachyOS-Arch-beta` from the candidate's Actions run. This is
+The [1.1.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.1.0) contains a native `.pkg.tar.zst` package, its corresponding
+source archive, PKGBUILD, source revision and SHA256SUMS. Download the package, source and SHA256SUMS from the release. CI also provides the
+`LGInputSwitch-CachyOS-Arch` artifact. This is
 not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
 packages may require a system update before installation.
 
@@ -62,9 +62,8 @@ sudo pacman -U ./lginputswitch-*.pkg.tar.zst
 The exporter uses the exact committed HEAD, including its matching recipe; local
 uncommitted edits are excluded. Use `--ref` to select a release commit. It emits
 provenance and a checked source archive, never personal config or build products.
-This Linux source package excludes the inherited Windows AMD implementation; it
-contains everything needed for Linux builds and their regression tests. For
-Windows development, use the full repository and review its provenance gate.
+The source package includes the full current source; the old inherited Windows
+implementation has been removed from version 1.1.0.
 CI builds as an unprivileged user in a clean Arch container and runs the same tests.
 
 ## Other Linux distributions

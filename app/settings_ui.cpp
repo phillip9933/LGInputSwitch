@@ -14,13 +14,9 @@
 #include <stdio.h> // for swprintf
 
 // Pull in ADL types / constants / globals
-#include "../amdddc/adl.h"        // has ADLPROCS, AdapterInfo, ADL_DISPLAY_* flags
+#include "../platform/windows/adl_session.h"
 
-extern bool InitADL();            // from adl.cpp
-
-// NOTE: This file MUST NOT mutate global ADL pointers (lpAdapterInfo, lpAdlDisplayInfo).
-// We allocate ONLY local ADL adapter/display structures to avoid stomping global state
-// used by the main app / hotkey thread.
+// Discovery owns its temporary buffers; the driver owns only its session.
 
 
 // Helper to pack/unpack adapter/display into a single pointer-sized value
@@ -46,11 +42,11 @@ static void EnumerateTargets() {
     g_targets.clear();
 
     // Ensure ADL initialized (safe to call multiple times)
-    if (!InitADL()) return;
+    if (!InitializeAdl()) return;
 
     // Get number of adapters
     int nAdapters = 0;
-    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&nAdapters) != 0 || nAdapters <= 0) {
+    if (Adl().adapterCount(&nAdapters) != 0 || nAdapters <= 0) {
         return;
     }
 
@@ -64,7 +60,7 @@ static void EnumerateTargets() {
     memset(localAdapters.data(), 0, sizeof(AdapterInfo) * nAdapters);
     for (auto& adapter : localAdapters) adapter.iSize = sizeof(AdapterInfo);
 
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters.data(), sizeof(AdapterInfo) * nAdapters) != 0) {
+    if (Adl().adapters(localAdapters.data(), sizeof(AdapterInfo) * nAdapters) != 0) {
         return;
     }
 
@@ -74,9 +70,9 @@ static void EnumerateTargets() {
         LPADLDisplayInfo localDisplayInfo = nullptr;
 
         int adapterIndex = localAdapters[i].iAdapterIndex;
-        if (adlprocs.ADL_Display_DisplayInfo_Get(adapterIndex, &displayCount, &localDisplayInfo, 0) != 0) {
+        if (Adl().displays(adapterIndex, &displayCount, &localDisplayInfo, 0) != 0) {
             // failed for this adapter — continue
-            if (localDisplayInfo) { ADL_Main_Memory_Free((void**)&localDisplayInfo); localDisplayInfo = nullptr; }
+            if (localDisplayInfo) { ReleaseAdlMemory((void**)&localDisplayInfo); localDisplayInfo = nullptr; }
             continue;
         }
 
@@ -107,7 +103,7 @@ static void EnumerateTargets() {
         }
 
         // Free the local display info allocated by ADL
-        ADL_Main_Memory_Free((void**)&localDisplayInfo);
+        ReleaseAdlMemory((void**)&localDisplayInfo);
     }
 }
 

@@ -6,8 +6,8 @@
 
 static int calls = 0, result = 0;
 static unsigned int sent = 0;
-extern "C" int SetVcpFeatureWithI2cAddr(int, int, unsigned short vcp,
-    unsigned int value, unsigned int source) {
+int SendAdlCommand(int, int, const lg::InputCommand& command) {
+    const auto vcp = command.featureCode, value = command.value, source = command.sourceAddress;
     if (vcp != 0xf4 || source != 0x50) std::abort();
     ++calls;
     sent = value;

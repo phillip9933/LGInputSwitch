@@ -1,6 +1,6 @@
 #include "platform.h"
 #ifdef Q_OS_WIN
-#include "../amdddc/adl.h"
+#include "../platform/windows/adl_session.h"
 #include "../app/app_config.h"
 #include "../platform/windows/adl_transport.h"
 #else
@@ -150,13 +150,13 @@ Discovery DiscoverDesktopMonitors()
 {
     Discovery result;
 #ifdef Q_OS_WIN
-    if (!InitADL())
+    if (!InitializeAdl())
     {
         result.message = "AMD display access is unavailable. Check the AMD graphics driver.";
         return result;
     }
     int count = 0;
-    if (adlprocs.ADL_Adapter_NumberOfAdapters_Get(&count) != ADL_OK || count <= 0)
+    if (Adl().adapterCount(&count) != ADL_OK || count <= 0)
     {
         result.message = "No AMD display adapters found.";
         return result;
@@ -164,7 +164,7 @@ Discovery DiscoverDesktopMonitors()
     std::vector<AdapterInfo> adapters(count);
     for (auto &adapter : adapters)
         adapter.iSize = sizeof(AdapterInfo);
-    if (adlprocs.ADL_Adapter_AdapterInfo_Get(adapters.data(), int(adapters.size() * sizeof(AdapterInfo))) !=
+    if (Adl().adapters(adapters.data(), int(adapters.size() * sizeof(AdapterInfo))) !=
         ADL_OK)
     {
         result.message = "Could not enumerate AMD adapters.";
@@ -174,7 +174,7 @@ Discovery DiscoverDesktopMonitors()
     {
         int displays = 0;
         ADLDisplayInfo *info = nullptr;
-        const auto rc = adlprocs.ADL_Display_DisplayInfo_Get(adapter.iAdapterIndex, &displays, &info, 0);
+        const auto rc = Adl().displays(adapter.iAdapterIndex, &displays, &info, 0);
         if (rc == ADL_OK && info)
             for (int j = 0; j < displays; ++j)
             {
@@ -190,7 +190,7 @@ Discovery DiscoverDesktopMonitors()
                      adapter.iAdapterIndex, display, false});
             }
         if (info)
-            ADL_Main_Memory_Free(reinterpret_cast<void **>(&info));
+            ReleaseAdlMemory(reinterpret_cast<void **>(&info));
     }
 #else
     QProcess process;

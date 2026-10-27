@@ -49,8 +49,8 @@ if(LG_BUILD_DESKTOP)
     endif()
     if(WIN32)
         target_sources(${target} PRIVATE app/app_config.cpp app/hotkeys.cpp
-            amdddc/adl.cpp amdddc/amdddc_core.cpp platform/windows/adl_transport.cpp resource/app.rc)
-        target_include_directories(${target} PRIVATE app amdddc adl-sdk/include resource)
+            platform/windows/adl_session.cpp platform/windows/adl_command.cpp platform/windows/adl_transport.cpp resource/app.rc)
+        target_include_directories(${target} PRIVATE app adl-sdk/include resource)
         target_compile_definitions(${target} PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
         target_link_libraries(${target} PRIVATE user32 shell32 advapi32 gdi32)
     else()
@@ -83,9 +83,9 @@ if(WIN32)
     add_executable(LGInputSwitch WIN32
         app/main.cpp app/app_tray.cpp app/app_config.cpp app/app_toggle.cpp
         app/hotkeys.cpp app/settings_ui.cpp app/welcome_ui.cpp
-        amdddc/adl.cpp amdddc/amdddc_core.cpp platform/windows/adl_transport.cpp
+        platform/windows/adl_session.cpp platform/windows/adl_command.cpp platform/windows/adl_transport.cpp
         resource/app.rc)
-    target_include_directories(LGInputSwitch PRIVATE app amdddc external adl-sdk/include resource)
+    target_include_directories(LGInputSwitch PRIVATE app external adl-sdk/include resource)
     target_compile_definitions(LGInputSwitch PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(LGInputSwitch PRIVATE lginput_core user32 shell32 advapi32 gdi32)
 endif()
@@ -97,10 +97,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME release-packaging COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/release_packaging.py)
     add_executable(regression tests/regression.cpp app/app_toggle.cpp app/hotkeys.cpp
         platform/windows/adl_transport.cpp)
     target_link_libraries(regression PRIVATE lginput_core)
-    target_include_directories(regression PRIVATE amdddc)
     if(NOT WIN32)
         target_include_directories(regression PRIVATE tests/win32)
     endif()
@@ -115,6 +116,15 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/linux_cli.py $<TARGET_FILE:lginputswitch>)
     endif()
     if(WIN32)
+        add_library(fake_adl SHARED tests/fake_adl.cpp)
+        add_library(fake_adl_incomplete SHARED tests/fake_adl.cpp)
+        target_compile_definitions(fake_adl_incomplete PRIVATE LG_FAKE_ADL_INCOMPLETE)
+        add_executable(adl_backend_test tests/adl_backend_windows.cpp
+            platform/windows/adl_session.cpp platform/windows/adl_command.cpp)
+        target_compile_definitions(adl_backend_test PRIVATE LG_ADL_TESTING)
+        target_link_libraries(adl_backend_test PRIVATE lginput_core)
+        add_test(NAME adl-backend COMMAND adl_backend_test
+            $<TARGET_FILE:fake_adl> $<TARGET_FILE:fake_adl_incomplete>)
         add_executable(startup_test tests/startup_windows.cpp)
         target_link_libraries(startup_test PRIVATE advapi32)
         set_target_properties(startup_test PROPERTIES OUTPUT_NAME "Startup Test")
