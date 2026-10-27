@@ -51,11 +51,13 @@ def publish(assets, version):
             if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                 raise ValueError('Artifact checksum mismatch: ' + name)
         for path in directory.iterdir():
-            if path.is_file() and path.name not in ['SHA256SUMS', 'SHA256SUMS-Windows']:
+            if path.is_file() and path.name not in ['SHA256SUMS', 'SHA256SUMS-Windows', 'SOURCE_REVISION']:
                 target = output / path.name
                 if target.exists() and target.read_bytes() != path.read_bytes():
                     raise ValueError('Conflicting artifact name: ' + path.name)
                 target.write_bytes(path.read_bytes())
+    # Both platform revisions were checked above; publish one canonical LF file.
+    (output / 'SOURCE_REVISION').write_bytes((revision + '\n').encode('ascii'))
     names = {p.name for p in output.iterdir()}
     required = {f'LGInputSwitch-{version}-Windows-x64.zip',
                 f'LGInputSwitch-{version}-Windows-legacy-x64.zip',
