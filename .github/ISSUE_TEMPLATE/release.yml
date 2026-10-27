@@ -81,7 +81,7 @@
       "id": "gates",
       "attributes": {
         "label": "Release promotion gates",
-        "value": "- [ ] Planned \u2192 Alpha: scope, acceptance criteria and supported platforms recorded; installable build or consumable SDK/test host exists.\n- [ ] Alpha \u2192 Beta: intended features implemented; core workflows pass; limitations documented.\n- [ ] Beta \u2192 RC: release blockers resolved; regression, upgrade/migration and data-safety checks pass; scope frozen.\n- [ ] RC \u2192 Stable: final candidate validated; notes/limitations ready; signing/checksums verified where applicable; release published.\n\nFor wallet/cloud changes cover relevant encryption, storage, backup/restore and sync behavior. Return RC to Beta if new feature scope enters."
+        "value": "- [ ] Planned \u2192 Alpha: scope, acceptance criteria and supported platforms recorded; installable build or consumable SDK/test host exists.\n- [ ] Alpha \u2192 Beta: intended features implemented; core workflows pass; limitations documented.\n- [ ] Beta \u2192 RC: release blockers resolved; regression, upgrade/migration and data-safety checks pass; scope frozen.\n- [ ] RC \u2192 Stable: final candidate validated; notes/limitations ready; signing/checksums verified where applicable; release published.\n\nFor LGInputSwitch cover explicit monitor targeting, custom mappings, shortcut conflicts, startup, reconnect/resume and config preservation. Return RC to Beta if new feature scope enters."
       },
       "validations": {
         "required": true

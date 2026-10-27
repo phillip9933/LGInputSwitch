@@ -7,6 +7,7 @@
 LPAdapterInfo		lpAdapterInfo = NULL;
 LPADLDisplayInfo	lpAdlDisplayInfo = NULL;
 ADLPROCS adlprocs = { 0,0,0,0 };
+static bool g_initialized = false;
 
 void* __stdcall ADL_Main_Memory_Alloc(int iSize)
 {
@@ -26,7 +27,7 @@ void __stdcall ADL_Main_Memory_Free(void** lpBuffer)
 bool InitADL()
 {
     // If already initialized, return success
-    if (adlprocs.hModule)
+    if (g_initialized)
         return true;
 
     int	ADL_Err = ADL_ERR;
@@ -58,12 +59,19 @@ bool InitADL()
         adlprocs.ADL_Display_EdidData_Get == NULL)
     {
         std::cerr << "Error: ADL initialization failed! This app will NOT work!";
+        if (adlprocs.hModule) FreeLibrary(adlprocs.hModule);
+        adlprocs = {};
         return false;
     }
     // Initialize ADL with second parameter = 1, which means: Get the info for only currently active adapters!
     ADL_Err = adlprocs.ADL_Main_Control_Create(ADL_Main_Memory_Alloc, 1);
 
-    return (ADL_OK == ADL_Err) ? true : false;
+    g_initialized = ADL_OK == ADL_Err;
+    if (!g_initialized) {
+        FreeLibrary(adlprocs.hModule);
+        adlprocs = {};
+    }
+    return g_initialized;
 }
 
 void FreeADL()
@@ -72,7 +80,8 @@ void FreeADL()
     ADL_Main_Memory_Free((void**)&lpAdapterInfo);
     ADL_Main_Memory_Free((void**)&lpAdlDisplayInfo);
 
-    adlprocs.ADL_Main_Control_Destroy();
-    FreeLibrary(adlprocs.hModule);
-    adlprocs.hModule = NULL;
+    if (g_initialized) adlprocs.ADL_Main_Control_Destroy();
+    if (adlprocs.hModule) FreeLibrary(adlprocs.hModule);
+    adlprocs = {};
+    g_initialized = false;
 }

@@ -1,32 +1,28 @@
-﻿#include "app_toggle.h"
-#include <windows.h>
-#include <cstdlib>
-#include "amdddc_core.h"
+#include "app_toggle.h"
+#include "../platform/windows/adl_transport.h"
 
-static unsigned int ParseHex(const std::string& s) {
-    return strtoul(s.c_str(), nullptr, 0);
+static std::string g_lastError;
+const std::string& LastInputError() { return g_lastError; }
+
+bool SendInputCode(const Target& target, const char* source, const char* code) {
+    if (!source || !code) {
+        g_lastError = "Missing I2C source address or input code.";
+        return false;
+    }
+    AdlTransport transport(target.adapterIndex, target.displayIndex);
+    const auto result = lg::SwitchInput(transport, source, code);
+    g_lastError = result.sent() ? std::string{} : result.detail;
+    return result.sent();
 }
 
-bool SendInputCode(const Target& t, const char* i2cAddrHex, const char* codeHex) {
-    // For this AMD+LG path, the CLI used a fixed side-channel code (0xF4) and put the input
-    // in the "value" field. We mirror that here and pass i2c subaddress (0x50) from config.
-    const unsigned short DUMMY_VCP = 0xF4; // ignored in our core; kept for clarity
-    unsigned int value = ParseHex(codeHex);     // e.g., 0xD0 / 0xD1 / 0x90 / 0x91
-    unsigned int i2c = ParseHex(i2cAddrHex);  // e.g., 0x50
-
-    int rc = SetVcpFeatureWithI2cAddr(
-        t.adapterIndex,
-        t.displayIndex,
-        DUMMY_VCP,
-        value,
-        i2c
-    );
-    return rc == 0;
-}
-
-bool ToggleCycle(const Target& t, const char* i2cAddrHex,
-    const std::vector<InputDef>& orderedInputs, int& idx) {
-    if (orderedInputs.empty()) return false;
-    idx = (idx + 1) % (int)orderedInputs.size();
-    return SendInputCode(t, i2cAddrHex, orderedInputs[idx].code.c_str());
+bool ToggleCycle(const Target& target, const char* source,
+    const std::vector<InputDef>& ordered, int& index) {
+    if (!source) {
+        g_lastError = "Missing I2C source address.";
+        return false;
+    }
+    AdlTransport transport(target.adapterIndex, target.displayIndex);
+    const auto result = lg::CycleInputs(transport, source, ordered, index);
+    g_lastError = result.sent() ? std::string{} : result.detail;
+    return result.sent();
 }

@@ -21,11 +21,7 @@ static unsigned char ucSetCommandWrite[SETWRITESIZE] = { 0x6e,0x51,0x84,0x03,0x0
 // Ensure ADL is initialized exactly once for this process
 static bool EnsureADL()
 {
-    static bool inited = false;
-    if (inited) return true;
-    if (!InitADL()) return false;
-    inited = true;
-    return true;
+    return InitADL();
 }
 
 // Local helper: raw I2C write via ADL

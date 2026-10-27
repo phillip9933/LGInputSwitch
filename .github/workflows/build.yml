@@ -3,7 +3,6 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 jobs:
   build:
     runs-on: windows-latest
@@ -20,3 +19,108 @@ jobs:
       with:
         name: LGInputSwitch-Build
         path: BuildOutput\LGInputSwitch.exe
+    - name: Configure regression tests
+      run: cmake -S . -B build-tests -A x64
+    - name: Build regression tests
+      run: cmake --build build-tests --config Release
+    - name: Run regression tests
+      run: ctest --test-dir build-tests -C Release --output-on-failure
+  regression-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Configure regression tests
+      run: cmake -S . -B build-tests
+    - name: Build regression tests
+      run: cmake --build build-tests
+    - name: Run regression tests
+      run: ctest --test-dir build-tests --output-on-failure
+    - name: Upload experimental Linux CLI
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-Linux-CLI-experimental
+        path: build-tests/lginputswitch
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-latest
+          arch: linux_gcc_64
+        - os: windows-latest
+          arch: win64_msvc2022_64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.8.3'
+        arch: ${{ matrix.arch }}
+        cache: true
+    - name: Configure desktop
+      run: cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON
+    - name: Build desktop and regression tests
+      run: cmake --build build-desktop --config Release --parallel 2
+    - name: Test desktop and backends
+      run: ctest --test-dir build-desktop -C Release --output-on-failure
+    - name: Render Linux theme previews
+      if: runner.os == 'Linux'
+      env:
+        QT_QPA_PLATFORM: offscreen
+      run: ./build-desktop/LGInputSwitchDesktop --preview --screenshot-dir build-desktop/previews
+    - name: Deploy Windows Qt runtime
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force desktop-bundle
+        Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
+        windeployqt --release --no-translations desktop-bundle/LGInputSwitchDesktop.exe
+    - name: Render Windows theme previews
+      if: runner.os == 'Windows'
+      env:
+        QT_QPA_PLATFORM: offscreen
+      shell: pwsh
+      run: '& ./build-desktop/Release/LGInputSwitchDesktop.exe --preview --screenshot-dir build-desktop/previews'
+    - name: Upload desktop candidate and previews
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-Desktop-${{ runner.os }}-experimental
+        path: |
+          desktop-bundle/
+          build-desktop/LGInputSwitchDesktop
+          build-desktop/previews/
+          docs/desktop-ui.md
+  desktop-kde:
+    name: KDE desktop integration
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+    - name: Install distro Qt and KDE development dependencies
+      run: pacman -Syu --noconfirm git cmake qt6-base qt6-wayland kglobalaccel ddcutil python desktop-file-utils
+    - uses: actions/checkout@v4
+    - name: Configure with KDE shortcuts
+      run: cmake -S . -B build-kde -DLG_BUILD_DESKTOP=ON -DLG_REQUIRE_KDE_SHORTCUTS=ON
+    - name: Build KDE-enabled desktop
+      run: cmake --build build-kde --parallel 2
+    - name: Run hardware-free regressions
+      run: ctest --test-dir build-kde --output-on-failure
+    - name: Build installable Arch and CachyOS beta package
+      run: |
+        useradd -m builder
+        chown -R builder:builder "$GITHUB_WORKSPACE"
+        runuser -u builder -- python3 scripts/prepare-arch-package.py --output build-arch-source
+        runuser -u builder -- bash -c 'cd build-arch-source && makepkg --noconfirm --nodeps'
+        cd build-arch-source
+        sha256sum ./*.pkg.tar.zst >> SHA256SUMS
+    - name: Upload Linux package and corresponding source
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-CachyOS-Arch-beta
+        path: |
+          build-arch-source/*.pkg.tar.zst
+          build-arch-source/lginputswitch-source.tar.gz
+          build-arch-source/PKGBUILD
+          build-arch-source/SOURCE_REVISION
+          build-arch-source/SHA256SUMS

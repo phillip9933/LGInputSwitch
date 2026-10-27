@@ -2,6 +2,7 @@
 #include "hotkeys.h"
 #include "util.h"
 #include "types.h"
+#include "../core/input_value.h"
 #include "../resource/resource.h"
 
 #include <windows.h>
@@ -61,6 +62,7 @@ static void EnumerateTargets() {
         return;
     }
     memset(localAdapters.data(), 0, sizeof(AdapterInfo) * nAdapters);
+    for (auto& adapter : localAdapters) adapter.iSize = sizeof(AdapterInfo);
 
     if (adlprocs.ADL_Adapter_AdapterInfo_Get(localAdapters.data(), sizeof(AdapterInfo) * nAdapters) != 0) {
         return;
@@ -183,6 +185,7 @@ static void FillFromConfig(HWND hDlg, const AppConfig& cfg) {
     wchar_t bufDB[32];
     _snwprintf_s(bufDB, _TRUNCATE, L"%d", dbVal);
     SetDlgItemTextW(hDlg, IDC_DEBOUNCE, bufDB);
+    CheckDlgButton(hDlg, IDC_START_WINDOWS, cfg.startWithWindows ? BST_CHECKED : BST_UNCHECKED);
 }
 
 static std::string GetEditA(HWND hDlg, int ctlId) {
@@ -218,12 +221,18 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     }
 
     // Inputs with codes
+    const auto previousInputs = io.inputs;
     std::vector<InputDef> inputs;
     if (IsDlgButtonChecked(hDlg, IDC_INPUT_DP) == BST_CHECKED) inputs.push_back({ "DisplayPort","0xD0" });
     if (IsDlgButtonChecked(hDlg, IDC_INPUT_USBC) == BST_CHECKED) inputs.push_back({ "USB-C","0xD1" });
     if (IsDlgButtonChecked(hDlg, IDC_INPUT_HDMI1) == BST_CHECKED) inputs.push_back({ "HDMI1","0x90" });
     if (IsDlgButtonChecked(hDlg, IDC_INPUT_HDMI2) == BST_CHECKED) inputs.push_back({ "HDMI2","0x91" });
     if (inputs.empty()) return false;
+    for (auto& input : inputs) {
+        auto previous = std::find_if(previousInputs.begin(), previousInputs.end(),
+            [&](const InputDef& old) { return old.label == input.label; });
+        if (previous != previousInputs.end()) input.code = previous->code;
+    }
     io.inputs = std::move(inputs);
 
     // Hotkeys
@@ -262,6 +271,7 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
 
     std::string d = GetEditA(hDlg, IDC_DEBOUNCE);
     io.debounceMs = d.empty() ? 750 : std::max(0, atoi(d.c_str()));
+    io.startWithWindows = IsDlgButtonChecked(hDlg, IDC_START_WINDOWS) == BST_CHECKED;
 
     return true;
 }
@@ -296,12 +306,41 @@ static INT_PTR DlgProcCommon(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam, 
         case IDC_ORDER_UP:   MoveSelected(GetDlgItem(hDlg, IDC_ORDER_LIST), true);  return TRUE;
         case IDC_ORDER_DOWN: MoveSelected(GetDlgItem(hDlg, IDC_ORDER_LIST), false); return TRUE;
         case IDC_SAVE: {
-            if (!CollectToConfig(hDlg, *s_cfg)) {
+            AppConfig updated = *s_cfg;
+            if (!CollectToConfig(hDlg, updated)) {
                 MessageBox(hDlg, L"Select at least one input.", L"LG Input Switch", MB_OK | MB_ICONWARNING);
                 return TRUE;
             }
+            unsigned int value = 0;
+            if (!ParseInputValue(updated.i2cSourceAddr, 0xff, value) ||
+                std::any_of(updated.inputs.begin(), updated.inputs.end(), [&](const InputDef& input) {
+                    return !ParseInputValue(input.code, 0xffff, value);
+                })) {
+                MessageBox(hDlg, L"Invalid I2C source address or input code. Use decimal or 0x-prefixed hexadecimal values.",
+                    L"LG Input Switch", MB_OK | MB_ICONWARNING);
+                return TRUE;
+            }
+            std::set<std::pair<UINT, UINT>> assigned;
+            auto validHotkey = [&](const std::string& text) {
+                if (text.empty()) return true;
+                HotkeySpec spec{};
+                return ParseHotkey(text, spec) && assigned.insert({spec.fsModifiers, spec.vk}).second;
+            };
+            bool hotkeysValid = validHotkey(updated.hotkeys.cycle);
+            for (const auto& hotkey : updated.hotkeys.direct)
+                hotkeysValid = validHotkey(hotkey.second) && hotkeysValid;
+            if (!hotkeysValid) {
+                MessageBox(hDlg, L"Enter distinct hotkeys such as CTRL+ALT+1 or CTRL+ALT+F12. Leave a field empty to disable it.",
+                    L"LG Input Switch", MB_OK | MB_ICONWARNING);
+                return TRUE;
+            }
             // Save config to disk
-            SaveConfig(*s_cfg);
+            if (!SaveConfig(updated)) {
+                MessageBox(hDlg, L"Could not save config.json. Check that the app folder is writable.",
+                    L"LG Input Switch", MB_OK | MB_ICONERROR);
+                return TRUE;
+            }
+            *s_cfg = std::move(updated);
 
             // Notify main window that settings were saved
             HWND parent = GetParent(hDlg);

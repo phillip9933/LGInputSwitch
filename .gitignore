@@ -15,3 +15,6 @@ ipch/
 *.tlog
 *.log
 config.json
+build*/
+
+__pycache__/

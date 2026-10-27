@@ -4,7 +4,7 @@ Read README.md for setup and supported hardware. Keep changes focused, preserve 
 
 ## Public roadmap and issue management
 
-Follow the [public roadmap](https://github.com/users/phillip9933/projects/2) for release plans and the work board for individual tasks. This is the shared convention across maintained repositories. Issues, milestones and Project fields are the live source of truth; do not duplicate the live task list in ROADMAP.md or other Markdown backlogs.
+Follow the [release tracker](https://github.com/phillip9933/LGInputSwitch/issues/8) for Windows release scope and [issues](https://github.com/phillip9933/LGInputSwitch/issues) for individual tasks. A dedicated public Project still needs setup; the former link led to Kura. The field conventions below apply when that board is available. Issues, milestones and Project fields are the live source of truth; do not duplicate the live task list in ROADMAP.md or other Markdown backlogs.
 
 ### Issue type and priority
 

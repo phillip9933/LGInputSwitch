@@ -5,8 +5,9 @@
 
 inline std::wstring ToW(const std::string& s) {
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-    std::wstring w(len ? len - 1 : 0, L'\0');
+    std::wstring w(len ? len : 0, L'\0');
     if (len) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), len);
+    if (len) w.pop_back(); // conversion includes the terminator
     return w;
 }
 

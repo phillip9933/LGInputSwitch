@@ -69,6 +69,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="core\input_switcher.cpp" />
+    <ClCompile Include="platform\windows\adl_transport.cpp" />
     <ClCompile Include="amdddc\adl.cpp" />
     <ClCompile Include="amdddc\amdddc_core.cpp" />
     <ClCompile Include="amdddc\settings.cpp" />
@@ -81,6 +83,10 @@
     <ClCompile Include="app\welcome_ui.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="core\input_switcher.h" />
+    <ClInclude Include="core\input_value.h" />
+    <ClInclude Include="platform\windows\adl_transport.h" />
+    <ClInclude Include="platform\windows\startup.h" />
     <ClInclude Include="amdddc\adl.h" />
     <ClInclude Include="amdddc\amdddc_core.h" />
     <ClInclude Include="amdddc\settings.h" />

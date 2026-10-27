@@ -229,9 +229,18 @@ bool LoadConfig(AppConfig& out) {
 
 bool SaveConfig(const AppConfig& cfg) {
     if (!EnsureConfigDir()) return false;
-    std::ofstream f(ConfigPath(), std::ios::binary | std::ios::trunc);
+    const auto destination = std::filesystem::path(ConfigPath());
+    auto temporary = destination;
+    temporary += ".tmp";
+    std::ofstream f(temporary, std::ios::binary | std::ios::trunc);
     if (!f) return false;
     const std::string json = ToJson(cfg);
     f.write(json.data(), (std::streamsize)json.size());
-    return (bool)f;
+    f.flush();
+    bool written = (bool)f;
+    f.close();
+    written = written && !f.fail();
+    if (!written) return false;
+    return MoveFileExW(temporary.c_str(), destination.c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }

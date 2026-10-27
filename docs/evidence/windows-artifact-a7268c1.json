@@ -1,0 +1,97 @@
+[
+  {
+    "path": "D3Dcompiler_47.dll",
+    "bytes": 4173928,
+    "sha256": "e994847e01a6f1e4cbdc5a864616ac262f67ee4f14db194984661a8d927ab7f4"
+  },
+  {
+    "path": "generic/qtuiotouchplugin.dll",
+    "bytes": 102024,
+    "sha256": "8e123c011d13ddf884d33f6fba50182d6525a3a7504b7eac0788ef45ab2f2cb1"
+  },
+  {
+    "path": "iconengines/qsvgicon.dll",
+    "bytes": 77448,
+    "sha256": "6418cb7f188af89fc6876059692d3940377a80bbdb55d70ab907406b46f671d0"
+  },
+  {
+    "path": "imageformats/qgif.dll",
+    "bytes": 47752,
+    "sha256": "0ee32e5b48bf1404532842862045c523e0c915f223e34ea900c709e7c72b0b1e"
+  },
+  {
+    "path": "imageformats/qico.dll",
+    "bytes": 46216,
+    "sha256": "30b344703bccbf4bf70809cb9b6ce0075b74bdc765d18e539339190b095bb552"
+  },
+  {
+    "path": "imageformats/qjpeg.dll",
+    "bytes": 575624,
+    "sha256": "1c3f3996b18b9a6d3f2690ef333843c9195bec2a4eb08f6e68a3b3bc7f097c32"
+  },
+  {
+    "path": "imageformats/qsvg.dll",
+    "bytes": 39048,
+    "sha256": "d901931d7f5da8b408f9fcfcfe9e53a4d2247b5fa391fd67ac22a9e9f13c1636"
+  },
+  {
+    "path": "LGInputSwitchDesktop.exe",
+    "bytes": 358400,
+    "sha256": "377fa356e4a6da74240f33a1c96c90c6a71b88425b59a9c509de7e5370e550a0"
+  },
+  {
+    "path": "networkinformation/qnetworklistmanager.dll",
+    "bytes": 71304,
+    "sha256": "9950a4a34df745df88b84bb605982999332f27217cba5802c2c30df5197db247"
+  },
+  {
+    "path": "opengl32sw.dll",
+    "bytes": 20639888,
+    "sha256": "b04de4541863bc7d8879040a78889c4849c1b1da2784c4630f734c146c2998ce"
+  },
+  {
+    "path": "platforms/qwindows.dll",
+    "bytes": 907912,
+    "sha256": "12577a7c4f2230bbea53f279573d7e3d1a08d631197855481e1e1580f61bb877"
+  },
+  {
+    "path": "Qt6Core.dll",
+    "bytes": 6159496,
+    "sha256": "0cc62e841959fb8f6d366ea116c6f6bbc273e30f0ef90d8aa2e4adeb81fd63f8"
+  },
+  {
+    "path": "Qt6Gui.dll",
+    "bytes": 9285768,
+    "sha256": "ca9f20d9b59d5bc321a87005b926b853ebcd6a2394823e14d3c8b5fc5702fa8c"
+  },
+  {
+    "path": "Qt6Network.dll",
+    "bytes": 1755784,
+    "sha256": "2c2f65c70989646f06d668883c031f06fac3f8de1f459278c94cc50dfe89988d"
+  },
+  {
+    "path": "Qt6Svg.dll",
+    "bytes": 528520,
+    "sha256": "efaf94c5c757a430ec5b89fc209089b14171b5cce945db961c32264f1cc99f80"
+  },
+  {
+    "path": "Qt6Widgets.dll",
+    "bytes": 6500488,
+    "sha256": "d34ef78b3d3b5506ee8279ce6efbfc263d773b74860af76e66b0715346897a3a"
+  },
+  {
+    "path": "styles/qmodernwindowsstyle.dll",
+    "bytes": 215688,
+    "sha256": "33f30e3ed3159b607cac9fb13c478f3e1059b63b39201194ee5f67d239180f01"
+  },
+  {
+    "path": "tls/qcertonlybackend.dll",
+    "bytes": 102024,
+    "sha256": "063f369b7975c97fb989eda88f7a78896e7c6d5de2b73cccf30aefa92b608aff"
+  },
+  {
+    "path": "tls/qschannelbackend.dll",
+    "bytes": 254600,
+    "sha256": "c58ab3c5873d3d5187ff1e6703662810f555ebe60c532e025250c47bbac2e50c"
+  }
+]
