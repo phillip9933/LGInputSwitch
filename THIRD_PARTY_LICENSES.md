@@ -16,13 +16,16 @@ This project incorporates or was inspired by the following:
 - Version-specific terms: https://github.com/nlohmann/json/blob/v3.12.0/docs/mkdocs/docs/home/license.md
 
 ## amildahl/amdddc-windows
-- License: No explicit license file was found at time of writing.
+- Upstream has no named project license. This entry preserves historical credit;
+  its implementation is not shipped in version 1.1.0.
 - Source: https://github.com/amildahl/amdddc-windows
-- Original CLI/source adapted for the Windows AMD backend.
+- Historical source/inspiration for the original Windows version.
+- Version 1.1.0 removes the inherited implementation and unused CLI; the current
+  backend and protocol encoder are newly written against documented APIs/data.
 - Written no-objection evidence: the owner replied to the maintainer’s reuse notice
   on 19 November 2025: https://github.com/amildahl/amdddc-windows/issues/3#issuecomment-3554891167 .
-- This is permission context, not a named MIT/AGPL grant. The scope for the new
-  AGPL distribution remains to be clarified; preserve upstream attribution.
+- The reply is retained as historical permission context, not a named MIT/AGPL grant.
+  No license is assigned to upstream-owned code by this project.
 
 ## DDC/CI references (documentation only)
 - ddcutil documentation/wiki
@@ -46,5 +49,5 @@ The Linux binary links distribution-provided Qt/KDE; those runtimes are not bund
 
 See [Windows redistribution audit](docs/windows-licensing.md) for the inspected
 Windows artifact, exact DLL inventory, upstream permission evidence and remaining
-Qt/Mesa/Microsoft notice/source/runtime packaging work. The CI artifact is not
-yet a license-complete Windows release bundle.
+Qt/Mesa/Microsoft notice/source/runtime packaging work. That audit describes the earlier candidate; the completed 1.1.0 bundle is documented
+in [Windows release setup](docs/windows-release.md).

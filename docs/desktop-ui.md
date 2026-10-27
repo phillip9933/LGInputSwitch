@@ -32,7 +32,7 @@ and window icons scale without raster stretching.
   accidentally switch the monitor. Registration conflicts are shown in the GUI.
 
 On Windows, the new executable reads and saves the existing config.json beside
-it. Preserve that file when moving a candidate executable. Existing enabled
+it. Preserve that file when moving a release executable. Existing enabled
 custom codes/order and additional configured targets are retained; disabled rows
 are retained in desktop preferences so they can be re-enabled. Run one Windows
 frontend at a time to avoid duplicate startup/hotkey ownership.
@@ -69,7 +69,7 @@ ctest --test-dir build-desktop -C Release --output-on-failure
 ```
 
 The executable is `LGInputSwitchDesktop` (Windows: `Release/LGInputSwitchDesktop.exe`).
-Windows candidates need their deployed Qt runtime; CI runs windeployqt. Linux
+Windows releases include deployed Qt, the official runtime installer, exact source and notices; CI tests the extracted ZIP. Linux
 needs the matching Qt runtime, desktop platform plugin and ddcutil. CMake installs
 the Linux executable, launcher and icon. The original Windows solution/executable
 and Linux CLI still build with no Qt dependency when the option is off.
@@ -100,7 +100,7 @@ writes to a fake ddcutil process. Existing core/backend tests remain in CI. Wind
 CI builds both executables and runs preview smoke checks; physical tray, native
 shortcut capture and OS theme transitions still need manual verification.
 
-Before replacing the legacy Windows UI or publishing stable builds, test system
+Additional real-hardware acceptance should cover system
 light/dark changes while the app is open, 100/150/200% scaling, keyboard navigation,
 contrast/accessibility, Explorer/tray restart, unavailable tray hosts, suspend and
 monitor reconnect, actual AMD hardware switching and legacy config upgrades.

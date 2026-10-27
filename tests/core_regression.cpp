@@ -1,3 +1,4 @@
+#include "../core/ddc_packet.h"
 #include "../core/input_history.h"
 #include "../core/input_switcher.h"
 #include <cstdlib>
@@ -28,6 +29,14 @@ class FakeTransport : public lg::InputTransport
 
 int main()
 {
+    const auto packet = lg::EncodeDdcWrite({0x50, 0xf4, 0xd0});
+    Check(packet && *packet == std::array<unsigned char, 8>{0x6e, 0x50, 0x84, 3, 0xf4, 0, 0xd0, 0x9d},
+          "DisplayPort wire packet incorrect");
+    const auto high = lg::EncodeDdcWrite({0x50, 0xf4, 0x1234});
+    Check(high && (*high)[5] == 0x12 && (*high)[6] == 0x34, "Wire value byte order incorrect");
+    for (const auto &bad : {lg::InputCommand{0x150, 0xf4, 0xd0}, lg::InputCommand{0x50, 0x60, 0xd0},
+                            lg::InputCommand{0x50, 0xf4, 0x10000}})
+        Check(!lg::EncodeDdcWrite(bad), "Invalid wire packet accepted");
     FakeTransport transport;
     auto invalid = lg::SwitchInput(transport, "0x150", "0x90");
     Check(invalid.status == lg::SwitchStatus::InvalidArgument && transport.commands.empty(),

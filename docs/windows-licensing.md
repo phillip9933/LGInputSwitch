@@ -1,5 +1,11 @@
 # Windows redistribution audit — 27 October 2026
 
+**1.1.0 update:** This is the historical audit of the earlier candidate. The current
+release removes the inherited AMD implementation and unused CLI, adds complete
+application/Qt source and notices, supplies the signed Microsoft runtime installer,
+and omits the optional Mesa/D3D compiler binaries. The Windows loader/packet path
+is tested with fake DLLs. See [current release setup](windows-release.md).
+
 This audit covers source at `a7268c1a79d95d3399f7818fd4263fe7e669c2b3`, the
 legacy Visual Studio/CMake targets, and the actual modern Windows artifact from
 [CI run 40345943184](https://github.com/phillip9933/LGInputSwitch/actions/runs/40345943184).

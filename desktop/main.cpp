@@ -745,6 +745,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         license->setOpenExternalLinks(true);
         license->setWordWrap(true);
         form->addRow(license);
+        auto *aboutQt = new QPushButton("About Qt");
+        connect(aboutQt, &QPushButton::clicked, this, [this] { QMessageBox::aboutQt(this); });
+        form->addRow(aboutQt);
         tabs->addTab(preferences, "Preferences");
         auto *advanced = new QFrame;
         advanced->setObjectName("card");
@@ -928,7 +931,7 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
-    app.setApplicationVersion("1.1.0-beta.1");
+    app.setApplicationVersion("1.1.0");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");

@@ -12,7 +12,7 @@ Originally a small Windows tray utility that switches **LG monitor inputs** (Dis
 
 Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 
-> **Windows requires AMD:** Windows uses AMD ADL. The Linux beta uses ddcutil; GPU and monitor support must be verified for each setup.
+> **Windows requires AMD:** Windows uses AMD ADL. The Linux version uses ddcutil; GPU and monitor support must be verified for each setup.
 > **⚠ I²C WARNING:** DDC/CI commands are sent directly to your monitor. Use at your own risk. Malformed commands can cause misbehavior on some displays.
 
 ## Features
@@ -24,6 +24,12 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 - **Start with Windows**: Settings checkbox, applied to the current user's logon. You can also edit `startWithWindows` in config.json and restart the app. Windows Startup Apps settings can independently disable startup.
 
 ## Download / Run (Windows)
+
+Download [version 1.1.0](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.1.0).
+Use the Windows x64 ZIP for the modern app or the legacy ZIP for the Win32 frontend.
+See [installation, upgrades and runtime setup](docs/windows-release.md).
+
+Legacy frontend instructions:
 1. Download the latest release from the **Releases** page.
 2. Run `LGInputSwitch.exe`.  
    - On first run it creates `config.json` next to the EXE and opens **Settings**.
@@ -45,11 +51,11 @@ C++17 library for command validation, input ordering, cycle state and results.
 
 See [code review and verification](docs/maintenance-review.md) and the [cross-platform architecture proposal](docs/cross-platform-design.md).
 
-## Linux CLI (experimental)
+## Linux CLI
 
 An initial CLI uses the installed `ddcutil` tool and the shared command-value
 validation. This is a development preview; A shared Qt tray/settings GUI and linked KDE Plasma shortcuts are now available
-as a Linux beta; see [Linux installation](docs/linux-install.md). Windows JSON is not migrated or read by this CLI.
+as a Linux version; see [Linux installation](docs/linux-install.md). Windows JSON is not migrated or read by this CLI.
 
 Build with a C++17 compiler and CMake:
 
@@ -79,7 +85,7 @@ app_config.* # config load/save, defaults (JSON via nlohmann::json)
 app_toggle.* # DDC/CI send helpers (input codes)
 settings_ui.* # settings dialog
 welcome_ui.* # welcome dialog for first run
-amdddc_* / adl.* # ADL bridge + raw DDC/CI I²C calls
+platform/windows # documented ADL API session + DDC packet transport
 /resource
 app.rc, resource.h, app.ico
 LICENSE
@@ -96,7 +102,8 @@ COPYRIGHT.md
 
 ## Credits & Licenses
 - **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  This project is essentially a
-  tray-based wrapper with UI/hotkeys around that approach so HUGE thanks to them for their work.
+  project began as a tray wrapper around that approach. Version 1.1.0 replaces
+  the inherited implementation with new API/session/packet code and retains this credit.
   https://github.com/amildahl/amdddc-windows
 - **nlohmann/json** — MIT  
   https://github.com/nlohmann/json
@@ -114,7 +121,7 @@ their original terms. Dependencies keep their own licenses; see
 ## Disclaimer
 This project is not affiliated with AMD or LG. Use at your own risk.
 
-## Modern desktop beta (Windows and Linux)
+## Modern desktop (Windows and Linux)
 
 An optional shared tray/settings frontend adds a refreshed layout, scalable monitor
 icon, shortcut recording on Windows, asynchronous monitor operations and system,
@@ -128,8 +135,8 @@ validation is required before replacing the existing Windows frontend.
 
 CachyOS/KDE Wayland testing has verified monitor switching, the tray/settings UI
 and linked Plasma shortcuts. Linux offers opt-in startup and cycle/previous/direct
-input shortcuts. [Install the native Arch/CachyOS beta package](docs/linux-install.md)
-or build from source. Windows' modern GUI remains experimental pending physical
-validation; use the legacy frontend for the focused maintenance candidate.
+input shortcuts. [Install the native Arch/CachyOS package](docs/linux-install.md)
+or build from source. Windows packages include both the modern and legacy frontends. Physical Windows
+hardware validation remains limited; see the release notes.
 
-See [candidate release notes and publication gates](docs/release-candidate.md).
+See [release notes](docs/releases/1.1.0.md) and [publication workflow](docs/release-candidate.md).

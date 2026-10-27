@@ -22,8 +22,8 @@ class Packaging(unittest.TestCase):
             (root / 'packaging/arch').mkdir(parents=True)
             (root / 'packaging/arch/PKGBUILD.in').write_text('@VERSION@ @SHA256@')
             (root / 'tracked').write_text('committed')
-            (root / 'amdddc').mkdir()
-            (root / 'amdddc/inherited.cpp').write_text('excluded Windows source')
+            (root / 'platform').mkdir()
+            (root / 'platform/backend.cpp').write_text('complete backend source')
             subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
             subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test',
                             '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture'], check=True)
@@ -31,18 +31,18 @@ class Packaging(unittest.TestCase):
             (root / 'tracked').write_text('uncommitted')
             (root / 'private-config').write_text('must not ship')
             output = root / 'out'
-            export.prepare(root, output, '1.1.0beta1', 'HEAD')
+            export.prepare(root, output, '1.1.0', 'HEAD')
             archive = output / 'lginputswitch-source.tar.gz'
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-            self.assertEqual((output / 'PKGBUILD').read_text(), '1.1.0beta1 ' + digest)
+            self.assertEqual((output / 'PKGBUILD').read_text(), '1.1.0 ' + digest)
             with tarfile.open(archive) as source:
                 self.assertEqual(source.extractfile('LGInputSwitch/tracked').read(), b'committed')
                 self.assertEqual(source.extractfile('LGInputSwitch/SOURCE_REVISION').read(),
                                  (revision + '\n').encode())
                 self.assertNotIn('LGInputSwitch/private-config', source.getnames())
-                self.assertNotIn('LGInputSwitch/amdddc/inherited.cpp', source.getnames())
+                self.assertIn('LGInputSwitch/platform/backend.cpp', source.getnames())
             with self.assertRaises(FileExistsError):
-                export.prepare(root, output, '1.1.0beta1', 'HEAD')
+                export.prepare(root, output, '1.1.0', 'HEAD')
             with self.assertRaises(ValueError):
                 export.prepare(root, root / 'invalid', '1;bad', 'HEAD')
 

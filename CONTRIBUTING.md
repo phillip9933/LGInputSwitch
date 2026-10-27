@@ -18,7 +18,7 @@ Use the Project’s **Status** field, never status labels: **Inbox → Ready →
 
 ### Release targets
 
-Repository milestones identify intended stable versions, with a platform prefix where useful (for example, Android or Desktop). Assign a milestone only when inclusion is intended; unscheduled ideas have none. Alpha, beta and RC builds stay under the intended stable-version milestone. Cross-repository release trackers link the relevant repository milestones. Estimated start/target dates are planning aids, not commitments; leave unknown dates unset.
+Repository milestones identify intended stable versions, with a platform prefix where useful (for example, Android or Desktop). Assign a milestone only when inclusion is intended; unscheduled ideas have none. Builds use numeric versions and full releases without alpha/beta/RC tag suffixes. Cross-repository release trackers link the relevant repository milestones. Estimated start/target dates are planning aids, not commitments; leave unknown dates unset.
 
 Multi-platform repositories use `platform:android`, `platform:desktop` or `platform:shared`. Do not add redundant platform labels to single-platform repositories.
 

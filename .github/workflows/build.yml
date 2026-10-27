@@ -3,9 +3,10 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
+  workflow_call:
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -35,10 +36,10 @@ jobs:
       run: cmake --build build-tests
     - name: Run regression tests
       run: ctest --test-dir build-tests --output-on-failure
-    - name: Upload experimental Linux CLI
+    - name: Upload Linux CLI
       uses: actions/upload-artifact@v4
       with:
-        name: LGInputSwitch-Linux-CLI-experimental
+        name: LGInputSwitch-Linux-CLI
         path: build-tests/lginputswitch
   desktop:
     name: Desktop (${{ matrix.os }})
@@ -48,7 +49,7 @@ jobs:
         include:
         - os: ubuntu-latest
           arch: linux_gcc_64
-        - os: windows-latest
+        - os: windows-2022
           arch: win64_msvc2022_64
     runs-on: ${{ matrix.os }}
     steps:
@@ -76,17 +77,63 @@ jobs:
       run: |
         New-Item -ItemType Directory -Force desktop-bundle
         Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
-        windeployqt --release --no-translations desktop-bundle/LGInputSwitchDesktop.exe
+        windeployqt --release --no-translations --no-compiler-runtime --no-opengl-sw --no-system-d3d-compiler desktop-bundle/LGInputSwitchDesktop.exe
+        if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
+    - name: Download verified Microsoft runtime installer and package Windows release
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile vc_redist.x64.exe
+        $signature = Get-AuthenticodeSignature ./vc_redist.x64.exe
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { throw 'Microsoft runtime signature invalid' }
+        $qtPrefix = (& qtpaths --query QT_INSTALL_PREFIX).Trim()
+        python scripts/windows-release.py --source-dir build-qt-source --desktop desktop-bundle --legacy build-desktop/Release/LGInputSwitch.exe --qt-prefix $qtPrefix --redist vc_redist.x64.exe --output build-windows-release
+        if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+    - name: Test extracted release with SDK paths removed
+      if: runner.os == 'Windows'
+      timeout-minutes: 2
+      shell: pwsh
+      env:
+        QT_QPA_PLATFORM: windows
+        QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
+      run: |
+        Expand-Archive build-windows-release/LGInputSwitch-1.1.0-Windows-x64.zip build-packaged-test
+        $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+        $env:QT_PLUGIN_PATH = ''
+        $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
+        $env:QML2_IMPORT_PATH = ''
+        $executable = (Resolve-Path ./build-packaged-test/LGInputSwitchDesktop.exe).Path
+        $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion
+        if ($version -ne '1.1.0') { throw "Wrong product version: $version" }
+        $process = Start-Process -FilePath $executable -ArgumentList '--version' -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "Packaged version check failed: $($process.ExitCode)" }
+        $process = Start-Process -FilePath $executable -ArgumentList '--preview','--screenshot-dir','packaged-previews' -Wait -PassThru
+        if ($process.ExitCode -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw "Packaged preview failed: $($process.ExitCode)" }
+    - name: Upload Windows release archives and corresponding source
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LGInputSwitch-Windows-1.1.0
+        path: |
+          build-windows-release/*.zip
+          build-windows-release/*.tar.gz
+          build-windows-release/*.tar.xz
+          build-windows-release/SOURCE_REVISION
+          build-windows-release/SHA256SUMS-Windows
     - name: Render Windows theme previews
       if: runner.os == 'Windows'
+      timeout-minutes: 2
       env:
         QT_QPA_PLATFORM: offscreen
+        QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
       shell: pwsh
-      run: '& ./build-desktop/Release/LGInputSwitchDesktop.exe --preview --screenshot-dir build-desktop/previews'
+      run: |
+        $process = Start-Process -FilePath ./build-desktop/Release/LGInputSwitchDesktop.exe -ArgumentList '--preview','--screenshot-dir','build-desktop/previews' -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw 'Windows preview rendering failed' }
     - name: Upload desktop candidate and previews
       uses: actions/upload-artifact@v4
       with:
-        name: LGInputSwitch-Desktop-${{ runner.os }}-experimental
+        name: LGInputSwitch-Desktop-${{ runner.os }}
         path: |
           desktop-bundle/
           build-desktop/LGInputSwitchDesktop
@@ -106,7 +153,7 @@ jobs:
       run: cmake --build build-kde --parallel 2
     - name: Run hardware-free regressions
       run: ctest --test-dir build-kde --output-on-failure
-    - name: Build installable Arch and CachyOS beta package
+    - name: Build installable Arch and CachyOS package
       run: |
         useradd -m builder
         chown -R builder:builder "$GITHUB_WORKSPACE"
@@ -117,7 +164,7 @@ jobs:
     - name: Upload Linux package and corresponding source
       uses: actions/upload-artifact@v4
       with:
-        name: LGInputSwitch-CachyOS-Arch-beta
+        name: LGInputSwitch-CachyOS-Arch
         path: |
           build-arch-source/*.pkg.tar.zst
           build-arch-source/lginputswitch-source.tar.gz
