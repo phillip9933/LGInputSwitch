@@ -16,7 +16,8 @@ This project incorporates or was inspired by the following:
 - Version-specific terms: https://github.com/nlohmann/json/blob/v3.12.0/docs/mkdocs/docs/home/license.md
 
 ## amildahl/amdddc-windows
-- License: No explicit license file was found at time of writing.
+- Upstream has no named project license. This entry preserves historical credit;
+  its implementation is not shipped in version 1.1.0.
 - Source: https://github.com/amildahl/amdddc-windows
 - Historical source/inspiration for the original Windows version.
 - Version 1.1.0 removes the inherited implementation and unused CLI; the current

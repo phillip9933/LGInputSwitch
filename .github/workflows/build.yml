@@ -100,10 +100,13 @@ jobs:
         $env:QT_PLUGIN_PATH = ''
         $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
         $env:QML2_IMPORT_PATH = ''
-        & ./build-packaged-test/LGInputSwitchDesktop.exe --version
-        if ($LASTEXITCODE -ne 0) { throw "Packaged version check failed: $LASTEXITCODE" }
-        & ./build-packaged-test/LGInputSwitchDesktop.exe --preview --screenshot-dir packaged-previews
-        if ($LASTEXITCODE -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw 'Packaged preview failed' }
+        $executable = (Resolve-Path ./build-packaged-test/LGInputSwitchDesktop.exe).Path
+        $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion
+        if ($version -ne '1.1.0') { throw "Wrong product version: $version" }
+        $process = Start-Process -FilePath $executable -ArgumentList '--version' -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "Packaged version check failed: $($process.ExitCode)" }
+        $process = Start-Process -FilePath $executable -ArgumentList '--preview','--screenshot-dir','packaged-previews' -Wait -PassThru
+        if ($process.ExitCode -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw "Packaged preview failed: $($process.ExitCode)" }
     - name: Upload Windows release archives and corresponding source
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
@@ -120,7 +123,9 @@ jobs:
       env:
         QT_QPA_PLATFORM: offscreen
       shell: pwsh
-      run: '& ./build-desktop/Release/LGInputSwitchDesktop.exe --preview --screenshot-dir build-desktop/previews'
+      run: |
+        $process = Start-Process -FilePath ./build-desktop/Release/LGInputSwitchDesktop.exe -ArgumentList '--preview','--screenshot-dir','build-desktop/previews' -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw 'Windows preview rendering failed' }
     - name: Upload desktop candidate and previews
       uses: actions/upload-artifact@v4
       with:
