@@ -77,7 +77,7 @@ jobs:
       run: |
         New-Item -ItemType Directory -Force desktop-bundle
         Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
-        windeployqt --release --no-translations --no-opengl-sw --no-system-d3d-compiler desktop-bundle/LGInputSwitchDesktop.exe
+        windeployqt --release --no-translations --no-compiler-runtime --no-opengl-sw --no-system-d3d-compiler desktop-bundle/LGInputSwitchDesktop.exe
         if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
     - name: Download verified Microsoft runtime installer and package Windows release
       if: runner.os == 'Windows'
@@ -93,7 +93,7 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       env:
-        QT_QPA_PLATFORM: offscreen
+        QT_QPA_PLATFORM: windows
       run: |
         Expand-Archive build-windows-release/LGInputSwitch-1.1.0-Windows-x64.zip build-packaged-test
         $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
@@ -101,7 +101,7 @@ jobs:
         $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
         $env:QML2_IMPORT_PATH = ''
         & ./build-packaged-test/LGInputSwitchDesktop.exe --version
-        if ($LASTEXITCODE -ne 0) { throw 'Packaged version check failed' }
+        if ($LASTEXITCODE -ne 0) { throw "Packaged version check failed: $LASTEXITCODE" }
         & ./build-packaged-test/LGInputSwitchDesktop.exe --preview --screenshot-dir packaged-previews
         if ($LASTEXITCODE -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw 'Packaged preview failed' }
     - name: Upload Windows release archives and corresponding source
