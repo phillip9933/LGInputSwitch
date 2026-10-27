@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import tarfile
@@ -20,6 +21,43 @@ publisher = module('publish-release')
 windows = module('windows-release')
 
 class ReleasePackaging(unittest.TestCase):
+    def test_cross_platform_revision_line_endings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures = {
+                'windows': ['LGInputSwitch-1.1.0-Windows-x64.zip',
+                            'LGInputSwitch-1.1.0-Windows-legacy-x64.zip',
+                            'LGInputSwitch-1.1.0-source.tar.gz',
+                            'qtbase-everywhere-src-6.8.3.tar.xz',
+                            'qtsvg-everywhere-src-6.8.3.tar.xz'],
+                'linux': ['lginputswitch-1.1.0-1-x86_64.pkg.tar.zst',
+                          'lginputswitch-source.tar.gz']}
+            for kind, names in fixtures.items():
+                directory = root / kind; directory.mkdir()
+                for name in names:
+                    (directory / name).write_bytes(b'fixture')
+                (directory / 'SOURCE_REVISION').write_bytes(b'fixture\r\n' if kind == 'windows' else b'fixture\n')
+                checksum = 'SHA256SUMS-Windows' if kind == 'windows' else 'SHA256SUMS'
+                (directory / checksum).write_text(''.join(
+                    hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n'
+                    for path in directory.iterdir()))
+            calls = []
+            def fake_run(*args):
+                calls.append(args)
+                if args[0] == 'git':
+                    return 'fixture\n'
+                if args[:2] == ('gh', 'api'):
+                    return json.dumps({'assets': [
+                        {'name': path.name, 'digest': 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()}
+                        for path in (root / 'publish').iterdir()]})
+                return '{}'
+            class MissingRelease:
+                returncode = 1
+            with patch.object(publisher, 'run', fake_run), patch.object(publisher.subprocess, 'run', return_value=MissingRelease()), patch.dict(os.environ, {'GITHUB_SHA':'fixture','GITHUB_REPOSITORY':'owner/repo'}):
+                publisher.publish(root, '1.1.0')
+            self.assertEqual((root / 'publish/SOURCE_REVISION').read_bytes(), b'fixture\n')
+            self.assertTrue(any('--prerelease=false' in call and '--latest' in call for call in calls))
+
     def test_numeric_versions_match_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
