@@ -91,9 +91,11 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
     - name: Test extracted release with SDK paths removed
       if: runner.os == 'Windows'
+      timeout-minutes: 2
       shell: pwsh
       env:
         QT_QPA_PLATFORM: windows
+        QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
       run: |
         Expand-Archive build-windows-release/LGInputSwitch-1.1.0-Windows-x64.zip build-packaged-test
         $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
@@ -120,8 +122,10 @@ jobs:
           build-windows-release/SHA256SUMS-Windows
     - name: Render Windows theme previews
       if: runner.os == 'Windows'
+      timeout-minutes: 2
       env:
         QT_QPA_PLATFORM: offscreen
+        QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
       shell: pwsh
       run: |
         $process = Start-Process -FilePath ./build-desktop/Release/LGInputSwitchDesktop.exe -ArgumentList '--preview','--screenshot-dir','build-desktop/previews' -Wait -PassThru
