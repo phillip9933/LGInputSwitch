@@ -12,7 +12,7 @@ import tarfile
 
 def prepare(root, output, version, ref):
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*", version):
-        raise ValueError("Use an Arch version such as 1.1.0")
+        raise ValueError("Use an Arch version such as 1.2.0")
     revision = subprocess.check_output(
         ["git", "rev-parse", "--verify", ref + "^{commit}"], cwd=root, text=True
     ).strip()
@@ -49,7 +49,7 @@ def prepare(root, output, version, ref):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="New output directory")
-    parser.add_argument("--version", default="1.1.0")
+    parser.add_argument("--version", default="1.2.0")
     parser.add_argument("--ref", default="HEAD", help="Committed revision to export")
     args = parser.parse_args()
     prepare(Path(__file__).resolve().parents[1], args.output.resolve(), args.version, args.ref)

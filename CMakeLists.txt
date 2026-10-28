@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0091 NEW)
-project(LGInputSwitch VERSION 1.1.0 LANGUAGES CXX)
+project(LGInputSwitch VERSION 1.2.0 LANGUAGES CXX)
 set(LG_BUILD_REVISION "unavailable")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
