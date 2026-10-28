@@ -21,6 +21,10 @@ and window icons scale without raster stretching.
   Windows adds shortcut recording, cycle shortcut and startup settings. Appearance
   changes preview immediately and persist when settings are saved.
 - Advanced: source address, debounce and editable input mapping.
+- Diagnostics: create, review, copy or save a local JSON support report. Reports
+  include OS/Qt/app versions and build revision, selected target, normalized input codes, unsaved-edit
+  status and the last command's target/result. Custom labels, shortcuts, raw EDID,
+  serial numbers, user names and paths are omitted. Nothing is uploaded.
 - Tray: open the app by left/double click, right-click for enabled inputs, cycle,
   open and quit. Closing hides only when a tray is available; without one the GUI
   remains usable and closing quits. A second instance shows where to find the app.
@@ -52,6 +56,43 @@ Other desktops (or builds without KGlobalAccel) retain the desktop-configured CL
 fallback. Linux offers opt-in per-user desktop autostart; see [installation and upgrades](linux-install.md). GNOME requires tray support via an appropriate
 extension; desktops without a tray can use the window. Tray-host and Wayland
 integration require desktop-specific manual testing.
+
+## Built-in diagnostics
+
+Open **Diagnostics → Create report** after a failed switch, review the report,
+then use **Copy report** or **Save report** to attach it to a support request.
+There is no need to save unfinished settings before generating a report: the
+report identifies unsaved edits, and records the last command separately with
+the target and codes actually used at that time.
+
+Diagnostics send no input-switching commands, change no settings and request no
+elevation. They query only standard brightness (`0x10`) and input (`0x60`) controls.
+On Linux, the existing ddcutil dependency reads the currently selected display/bus;
+without a selected monitor, those reads are skipped. Only recognized numeric VCP
+results and fixed status messages are exported, never raw ddcutil output. Each
+read times out after five seconds. On Windows, system-provided Dxva2 APIs query
+up to eight desktop displays. These Windows display identifiers are distinct
+from the app's AMD adapter/display indices; the report does not assert a mapping.
+GPU model and installed driver version are collected using Windows display and
+registry APIs. The Windows check runs in an isolated child process with a
+12-second timeout, before GUI/ADL initialization. An unsuccessful/timed-out read
+does not establish that a monitor is unsupported.
+
+Standard DDC/CI reads do not verify LG's alternate `0xF4`/source-`0x50` path, and a
+successful send does not confirm a physical input change. No vendor-code scans,
+factory-menu operations, automatic fallback writes or guessed input values are
+performed. Preview mode uses synthetic data and does not run diagnostic probes.
+
+The implementation shares a bounded Qt process runner with Linux discovery,
+uses Qt's existing JSON/export facilities and adds no third-party runtime library.
+Dxva2 is provided by Windows. Qt, optional KDE shortcuts and Linux ddcutil remain
+the existing dependencies; removing those would require independently replacing
+their GUI, desktop integration and hardware handling. The Qt-free CLI and legacy
+Windows frontend are unchanged by this increment.
+
+Windows API references (new implementation; no upstream implementation copied):
+[GetVCPFeatureAndVCPFeatureReply](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-getvcpfeatureandvcpfeaturereply)
+and [physical monitor enumeration](https://learn.microsoft.com/en-us/windows/win32/api/physicalmonitorenumerationapi/).
 
 ## Build
 

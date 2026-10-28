@@ -2,6 +2,7 @@
 #include "../core/input_value.h"
 #include "kde_shortcuts.h"
 #include "platform.h"
+#include "diagnostics.h"
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
 #endif
@@ -9,6 +10,8 @@
 #include <QtWidgets>
 #include <map>
 #include <memory>
+#include <iostream>
+#include <cstring>
 #ifdef Q_OS_WIN
 #include "../app/hotkeys.h"
 #include "../platform/windows/startup.h"
@@ -68,6 +71,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     QWidget *controls_;
     QVector<DesktopMonitor> detected_;
     QElapsedTimer lastSend_;
+    QPlainTextEdit *diagnosticReport_;
+    QPushButton *diagnosticRun_, *diagnosticCopy_, *diagnosticSave_;
+    QJsonObject lastCommand_;
 #ifdef Q_OS_WIN
     std::map<int, int> hotkeys_;
 #endif
@@ -407,9 +413,17 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         const auto snapshot = config_;
         const auto row = config_.inputs[index];
         auto *watcher = new QFutureWatcher<lg::SwitchResult>(this);
-        connect(watcher, &QFutureWatcher<lg::SwitchResult>::finished, this, [this, watcher, index, row] {
+        connect(watcher, &QFutureWatcher<lg::SwitchResult>::finished, this, [this, watcher, index, row, snapshot] {
             auto result = watcher->result();
             watcher->deleteLater();
+            unsigned int value = 0, source = 0;
+            ParseInputValue(row.code.toStdString(), 0xffff, value);
+            ParseInputValue(snapshot.source.toStdString(), 0xff, source);
+            lastCommand_ = {{"status", result.sent() ? "command sent; physical switch unverified" : "failed"},
+                {"native_code", result.nativeCode}, {"adapter", snapshot.adapter},
+                {snapshot.bus ? "i2c_bus" : "display", snapshot.display},
+                {"source", QString("0x%1").arg(source, 2, 16, QChar('0'))},
+                {"input", QString("0x%1").arg(value, 4, 16, QChar('0'))}};
             setBusy(false);
             if (result.sent())
             {
@@ -456,6 +470,29 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             message(result.message);
         });
         watcher->setFuture(QtConcurrent::run(&worker_, [] { return DiscoverDesktopMonitors(); }));
+    }
+    void diagnostics()
+    {
+        if (busy_) return;
+        const DiagnosticSnapshot snapshot{collect(), monitors_->currentIndex() >= 0, dirty_, lastCommand_};
+        diagnosticReport_->setPlainText("Reading diagnostic information…");
+        diagnosticCopy_->setEnabled(false);
+        diagnosticSave_->setEnabled(false);
+        setBusy(true);
+        message("Reading monitor information. No input-switching commands are sent.");
+        auto *watcher = new QFutureWatcher<QJsonObject>(this);
+        connect(watcher, &QFutureWatcher<QJsonObject>::finished, this, [this, watcher, snapshot] {
+            const auto checks = watcher->result();
+            watcher->deleteLater();
+            diagnosticReport_->setPlainText(FormatDesktopDiagnostics(snapshot, checks, preview_));
+            setBusy(false);
+            diagnosticCopy_->setEnabled(true);
+            diagnosticSave_->setEnabled(true);
+            message("Diagnostic report ready. Review it, then copy or save it to share.");
+        });
+        watcher->setFuture(QtConcurrent::run(&worker_, [snapshot, preview = preview_] {
+            return CollectDesktopDiagnostics(snapshot, preview);
+        }));
     }
     void rebuildMenu()
     {
@@ -770,6 +807,47 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         explanation->setWordWrap(true);
         advancedForm->addRow(explanation);
         tabs->addTab(advanced, "Advanced");
+        auto *diagnosticsTab = new QFrame;
+        diagnosticsTab->setObjectName("card");
+        auto *diagnosticsLayout = new QVBoxLayout(diagnosticsTab);
+        diagnosticsLayout->setContentsMargins(18, 18, 18, 18);
+        auto *diagnosticsHint = new QLabel(
+            "Having trouble switching? Create a report with system details, input codes and read-only "
+            "monitor checks. No settings are changed or uploaded. Review the report before sharing it.");
+        diagnosticsHint->setWordWrap(true);
+        diagnosticsLayout->addWidget(diagnosticsHint);
+        diagnosticReport_ = new QPlainTextEdit;
+        diagnosticReport_->setObjectName("diagnosticReport");
+        diagnosticReport_->setAccessibleName("Diagnostic report");
+        diagnosticReport_->setReadOnly(true);
+        diagnosticReport_->setPlaceholderText("Create a report to see diagnostic information here.");
+        diagnosticsLayout->addWidget(diagnosticReport_, 1);
+        auto *diagnosticButtons = new QHBoxLayout;
+        diagnosticRun_ = new QPushButton("Create report");
+        diagnosticRun_->setObjectName("diagnosticRun");
+        diagnosticCopy_ = new QPushButton("Copy report");
+        diagnosticSave_ = new QPushButton("Save report…");
+        diagnosticCopy_->setEnabled(false);
+        diagnosticSave_->setEnabled(false);
+        diagnosticButtons->addWidget(diagnosticRun_);
+        diagnosticButtons->addStretch();
+        diagnosticButtons->addWidget(diagnosticCopy_);
+        diagnosticButtons->addWidget(diagnosticSave_);
+        diagnosticsLayout->addLayout(diagnosticButtons);
+        connect(diagnosticRun_, &QPushButton::clicked, this, [this] { diagnostics(); });
+        connect(diagnosticCopy_, &QPushButton::clicked, this, [this] {
+            QApplication::clipboard()->setText(diagnosticReport_->toPlainText());
+            message("Report copied. Paste it into your support request when ready.");
+        });
+        connect(diagnosticSave_, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getSaveFileName(this, "Save diagnostic report", "lginputswitch-diagnostics.json",
+                                                         "JSON report (*.json)");
+            if (path.isEmpty()) return;
+            QString error;
+            message(SaveDesktopDiagnostics(path, diagnosticReport_->toPlainText(), error)
+                        ? "Diagnostic report saved." : "Could not save the report: " + error);
+        });
+        tabs->addTab(diagnosticsTab, "Diagnostics");
         layout->addWidget(controls_, 1);
         status_ = new QLabel;
         status_->setObjectName("status");
@@ -902,6 +980,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     void capture(const QString &directory)
     {
         QDir().mkpath(directory);
+        if (preview_)
+        {
+            const DiagnosticSnapshot snapshot{collect(), true, false, {}};
+            diagnosticReport_->setPlainText(FormatDesktopDiagnostics(snapshot,
+                CollectDesktopDiagnostics(snapshot, true), true));
+            diagnosticCopy_->setEnabled(true);
+            diagnosticSave_->setEnabled(true);
+        }
         auto *tabs = findChild<QTabWidget *>();
         for (const auto &mode : {QString("light"), QString("dark")})
         {
@@ -928,6 +1014,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 #ifndef LG_DESKTOP_TEST
 int main(int argc, char **argv)
 {
+#ifdef Q_OS_WIN
+    if (argc == 2 && std::strcmp(argv[1], "--diagnostic-probe") == 0)
+    {
+        QCoreApplication app(argc, argv);
+        std::cout << QJsonDocument(ProbeWindowsMonitorControls()).toJson(QJsonDocument::Compact).constData();
+        return 0;
+    }
+#endif
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
