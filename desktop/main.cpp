@@ -812,8 +812,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *diagnosticsLayout = new QVBoxLayout(diagnosticsTab);
         diagnosticsLayout->setContentsMargins(18, 18, 18, 18);
         auto *diagnosticsHint = new QLabel(
-            "Having trouble switching? Create a report with system details, input codes and read-only "
-            "monitor checks. No settings are changed or uploaded. Review the report before sharing it.");
+            "Having trouble switching? Create a report with system details, advertised controls and input "
+            "values, and read-only monitor checks. No settings are changed or uploaded. Review before sharing.");
         diagnosticsHint->setWordWrap(true);
         diagnosticsLayout->addWidget(diagnosticsHint);
         diagnosticReport_ = new QPlainTextEdit;

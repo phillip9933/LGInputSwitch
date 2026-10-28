@@ -10,7 +10,7 @@ struct DesktopProcessResult
 
 // No shell or elevation. Used for discovery and explicit read-only diagnostics.
 inline DesktopProcessResult RunDesktopProcess(const QString &program, const QStringList &arguments,
-                                               int timeoutMs)
+                                               int timeoutMs, int outputLimit = 65536)
 {
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -23,6 +23,8 @@ inline DesktopProcessResult RunDesktopProcess(const QString &program, const QStr
         process.waitForFinished(3000);
         return {"timed out", -1, {}};
     }
+    const auto output = process.readAll();
+    if (output.size() > outputLimit) return {"output limit exceeded", process.exitCode(), {}};
     return {process.exitStatus() == QProcess::NormalExit ? "finished" : "crashed",
-            process.exitCode(), process.readAll().left(65536)};
+            process.exitCode(), output};
 }

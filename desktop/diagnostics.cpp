@@ -32,12 +32,13 @@ QJsonObject ParseDiagnosticVcp(const QByteArray &output, unsigned int feature)
 QJsonObject CollectDesktopDiagnostics(const DiagnosticSnapshot &snapshot, bool preview)
 {
     if (preview)
-        return {{"status", "Design preview; no settings or hardware accessed."}};
+        return {{"status", "Design preview; no settings or hardware accessed."},
+            {"capabilities", ParseDiagnosticCapabilities("(vcp(10 12 60(0f 11 12) f4)mccs_ver(2.2))")}};
 #ifdef Q_OS_WIN
     Q_UNUSED(snapshot);
     // A hung display driver cannot hold the UI or application shutdown indefinitely.
     const auto result = RunDesktopProcess(QCoreApplication::applicationFilePath(),
-                                          {"--diagnostic-probe"}, 12000);
+                                          {"--diagnostic-probe"}, 20000, 262144);
     QJsonObject checks{{"probe_status", result.status}, {"probe_exit_code", result.exitCode}};
     if (result.status == "finished" && result.exitCode == 0)
     {
@@ -79,6 +80,18 @@ QJsonObject CollectDesktopDiagnostics(const DiagnosticSnapshot &snapshot, bool p
         controls["0x" + code] = value;
     }
     checks["standard_vcp_reads"] = controls;
+    const auto capabilities = RunDesktopProcess("ddcutil",
+        {snapshot.config.bus ? "--bus" : "--display", QString::number(snapshot.config.display),
+         "capabilities", "--terse"}, 10000);
+    QJsonObject advertised{{"read", false}};
+    if (capabilities.status == "finished" && capabilities.exitCode == 0)
+    {
+        advertised = ParseDiagnosticCapabilities(capabilities.output);
+        advertised["read"] = true;
+    }
+    advertised["process_status"] = capabilities.status;
+    advertised["exit_code"] = capabilities.exitCode;
+    checks["capabilities"] = advertised;
     return checks;
 #endif
 }
@@ -92,7 +105,7 @@ QString FormatDesktopDiagnostics(const DiagnosticSnapshot &snapshot, const QJson
         {"os", QSysInfo::prettyProductName()}, {"kernel_version", QSysInfo::kernelVersion()},
         {"architecture", QSysInfo::currentCpuArchitecture()}, {"preview", preview},
         {"settings_unsaved", snapshot.unsaved},
-        {"privacy", "No raw EDID, serial numbers, usernames, hostnames, paths or shortcuts collected. "
+        {"privacy", "No raw EDID/capability strings, serial numbers, usernames, hostnames, personal file paths or shortcuts exported. "
                     "Nothing uploaded. Review before sharing."},
         {"limits", "Read-only standard brightness (0x10) and input (0x60) queries do not prove support "
                    "for LG 0xF4/source-0x50 switching. Command sent does not confirm a physical switch."},
@@ -143,10 +156,35 @@ QJsonObject ReadWindowsVcp(HANDLE monitor, BYTE feature)
         return {{"read", true}, {"value", static_cast<qint64>(current)}};
     return {{"read", false}, {"windows_error", static_cast<qint64>(GetLastError())}};
 }
+QJsonObject ReadWindowsCapabilities(HANDLE monitor)
+{
+    DWORD length = 0;
+    if (!GetCapabilitiesStringLength(monitor, &length))
+        return {{"read", false}, {"windows_error", static_cast<qint64>(GetLastError())}};
+    if (length == 0 || length > 65536)
+        return {{"read", false}, {"error", "Invalid capabilities response length"}};
+    QByteArray buffer(static_cast<int>(length), '\0');
+    if (!CapabilitiesRequestAndCapabilitiesReply(monitor, buffer.data(), length))
+        return {{"read", false}, {"windows_error", static_cast<qint64>(GetLastError())}};
+    const auto end = buffer.indexOf('\0');
+    if (end < 0)
+        return {{"read", true}, {"parse_status", "unterminated response"}};
+    auto result = ParseDiagnosticCapabilities(buffer.left(end));
+    result["read"] = true;
+    return result;
+}
+struct WindowsProbeContext
+{
+    QJsonArray displays;
+    int physicalReads = 0;
+    bool limited = false;
+};
 BOOL CALLBACK ProbeDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM context)
 {
-    auto &displays = *reinterpret_cast<QJsonArray *>(context);
-    if (displays.size() >= 8) return FALSE;
+    auto &probe = *reinterpret_cast<WindowsProbeContext *>(context);
+    auto &displays = probe.displays;
+    if (displays.size() >= 8 || probe.physicalReads >= 8)
+    { probe.limited = true; return FALSE; }
     MONITORINFOEXW info{}; info.cbSize = sizeof(info);
     QJsonObject display;
     if (GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO *>(&info)))
@@ -161,8 +199,13 @@ BOOL CALLBACK ProbeDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM context)
         {
             QJsonArray controls;
             for (const auto &item : physical)
+            {
+                if (probe.physicalReads >= 8) { probe.limited = true; break; }
+                ++probe.physicalReads;
                 controls.append(QJsonObject{{"0x10", ReadWindowsVcp(item.hPhysicalMonitor, 0x10)},
-                                             {"0x60", ReadWindowsVcp(item.hPhysicalMonitor, 0x60)}});
+                                             {"0x60", ReadWindowsVcp(item.hPhysicalMonitor, 0x60)},
+                                             {"capabilities", ReadWindowsCapabilities(item.hPhysicalMonitor)}});
+            }
             DestroyPhysicalMonitors(count, physical.data());
             display["physical_monitors"] = controls;
         }
@@ -199,10 +242,11 @@ QJsonObject ProbeWindowsMonitorControls()
         }
         adapters.append(adapter);
     }
-    QJsonArray displays;
-    const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, ProbeDisplay, reinterpret_cast<LPARAM>(&displays));
-    return {{"adapters", adapters}, {"displays", displays}, {"enumeration_complete", bool(enumerated)},
-        {"scope", "Standard Windows DDC/CI reads on up to 8 desktop displays; Windows display identifiers "
+    WindowsProbeContext probe;
+    const BOOL enumerated = EnumDisplayMonitors(nullptr, nullptr, ProbeDisplay, reinterpret_cast<LPARAM>(&probe));
+    return {{"adapters", adapters}, {"displays", probe.displays}, {"enumeration_complete", bool(enumerated)},
+        {"monitor_limit_reached", probe.limited},
+        {"scope", "Standard Windows DDC/CI reads on up to 8 desktop displays and 8 physical monitors; Windows display identifiers "
                   "are not ADL adapter/display indices. No AMD raw write API is called."}};
 }
 #endif

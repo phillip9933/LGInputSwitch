@@ -23,8 +23,10 @@ and window icons scale without raster stretching.
 - Advanced: source address, debounce and editable input mapping.
 - Diagnostics: create, review, copy or save a local JSON support report. Reports
   include OS/Qt/app versions and build revision, selected target, normalized input codes, unsaved-edit
-  status and the last command's target/result. Custom labels, shortcuts, raw EDID,
-  serial numbers, user names and paths are omitted. Nothing is uploaded.
+  status and the last command's target/result, advertised VCP controls/MCCS version,
+  and any advertised standard/LG input values. Custom labels, shortcuts, raw EDID
+  and capability strings, serial numbers, user names and personal file paths are
+  omitted. Nothing is uploaded.
 - Tray: open the app by left/double click, right-click for enabled inputs, cycle,
   open and quit. Closing hides only when a tray is available; without one the GUI
   remains usable and closing quits. A second instance shows where to find the app.
@@ -66,17 +68,39 @@ report identifies unsaved edits, and records the last command separately with
 the target and codes actually used at that time.
 
 Diagnostics send no input-switching commands, change no settings and request no
-elevation. They query only standard brightness (`0x10`) and input (`0x60`) controls.
+elevation. They read standard brightness (`0x10`) and input (`0x60`) values, plus
+the monitor's advertised capabilities.
 On Linux, the existing ddcutil dependency reads the currently selected display/bus;
 without a selected monitor, those reads are skipped. Only recognized numeric VCP
-results and fixed status messages are exported, never raw ddcutil output. Each
-read times out after five seconds. On Windows, system-provided Dxva2 APIs query
-up to eight desktop displays. These Windows display identifiers are distinct
+results and parsed capability fields are exported, never raw ddcutil output. VCP
+reads time out after five seconds and the capability request after ten seconds.
+On Windows, system-provided Dxva2 APIs query up to eight desktop displays and
+eight physical monitors. These Windows display identifiers are distinct
 from the app's AMD adapter/display indices; the report does not assert a mapping.
 GPU model and installed driver version are collected using Windows display and
 registry APIs. The Windows check runs in an isolated child process with a
-12-second timeout, before GUI/ADL initialization. An unsuccessful/timed-out read
+20-second timeout, before GUI/ADL initialization. An unsuccessful/timed-out read
 does not establish that a monitor is unsupported.
+
+Capabilities include the advertised VCP code list, MCCS version when provided,
+and advertised value lists for standard Input Source (`0x60`) and manufacturer
+control `0xF4`. Common standard input values have names such as HDMI 1 or
+DisplayPort 1; vendor values remain numeric rather than guessing their meaning.
+The report distinguishes a missing control, an advertised control without a
+value list, an explicitly empty list, a failed request and a malformed response.
+No advertised value is automatically applied to the user's configuration.
+
+The bounded shared parser accepts only top-level capability fields and numeric
+control/value tokens. Free-text model/serial/vendor fields are discarded; nested
+text cannot inject a control list. Responses over 64 KiB, excessive nesting,
+ambiguous duplicate VCP sections and malformed/oversized input-value lists are
+reported as unreadable rather than exporting partial guessed data. Windows
+child output is capped at 256 KiB; other command output is capped at 64 KiB.
+
+Advertised capabilities are not authoritative: a missing control/value is not
+proof that the monitor cannot use it, and an advertised one is not proof it works.
+The report replaces the external capability/control screenshot normally requested
+for initial troubleshooting; it is not a full monitor-control utility.
 
 Standard DDC/CI reads do not verify LG's alternate `0xF4`/source-`0x50` path, and a
 successful send does not confirm a physical input change. No vendor-code scans,
@@ -93,6 +117,9 @@ Windows frontend are unchanged by this increment.
 Windows API references (new implementation; no upstream implementation copied):
 [GetVCPFeatureAndVCPFeatureReply](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-getvcpfeatureandvcpfeaturereply)
 and [physical monitor enumeration](https://learn.microsoft.com/en-us/windows/win32/api/physicalmonitorenumerationapi/).
+Capability retrieval uses
+[CapabilitiesRequestAndCapabilitiesReply](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-capabilitiesrequestandcapabilitiesreply);
+Linux uses [ddcutil capabilities --terse](https://www.ddcutil.com/command_capabilities/).
 
 ## Build
 

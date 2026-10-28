@@ -147,7 +147,9 @@ int main(int argc, char **argv)
         diagnosticsBackend.write(("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + log + ".reads'\n"
             "case \"$*\" in\n--version) echo 'ddcutil 2.2.0';;\n"
             "'--bus 31 getvcp 10 --terse') printf 'VCP 10 C 55 100\\nSerial number: PRIVATE\\n';;\n"
-            "'--bus 31 getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n*) exit 92;;\nesac\n").toUtf8());
+            "'--bus 31 getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n"
+            "'--bus 31 capabilities --terse') echo '(model(PRIVATE)vcp(10 60(0F 11 12) F4)mccs_ver(2.2))';;\n"
+            "*) exit 92;;\nesac\n").toUtf8());
         diagnosticsBackend.close();
         auto *runReport = live.findChild<QPushButton *>("diagnosticRun");
         auto *report = live.findChild<QPlainTextEdit *>("diagnosticReport");
@@ -155,15 +157,32 @@ int main(int argc, char **argv)
         check(waitUntil([&] { return runReport->isEnabled() && report->toPlainText().contains("standard_vcp_reads"); }),
               "Live diagnostic report failed");
         const auto reportText = report->toPlainText();
-        check(!reportText.contains("PRIVATE") && reportText.contains("last_command") && reportText.contains("0x00d0"),
+        check(!reportText.contains("PRIVATE") && reportText.contains("last_command") && reportText.contains("0x00d0") &&
+              reportText.contains("HDMI 1") && reportText.contains("advertised_vcp_codes"),
               "Report leaked raw output or lost command context");
         QFile reads(log + ".reads");
         check(reads.open(QIODevice::ReadOnly), "Diagnostic commands not recorded");
-        check(reads.readAll() == "--version\n--bus 31 getvcp 10 --terse\n--bus 31 getvcp 60 --terse\n",
+        check(reads.readAll() == "--version\n--bus 31 getvcp 10 --terse\n--bus 31 getvcp 60 --terse\n--bus 31 capabilities --terse\n",
               "Diagnostics issued an unexpected command");
         QFile baseline(log);
         check(baseline.open(QIODevice::ReadOnly), "Switch record unavailable");
         check(baseline.readAll().contains("setvcp\n0xf4\n0xd0"), "Diagnostics changed the last switch");
+        baseline.close();
+        check(diagnosticsBackend.open(QIODevice::WriteOnly | QIODevice::Truncate), "Could not create failed capability fixture");
+        diagnosticsBackend.write(
+            "#!/bin/sh\ncase \"$*\" in\n--version) echo 'ddcutil 2.2.0';;\n"
+            "'--bus 31 getvcp 10 --terse') echo 'VCP 10 C 55 100';;\n"
+            "'--bus 31 getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n"
+            "'--bus 31 capabilities --terse') echo 'PRIVATE'; exit 87;;\n*) exit 92;;\nesac\n");
+        diagnosticsBackend.close();
+        runReport->click();
+        check(waitUntil([&] { return runReport->isEnabled(); }), "Failed capability query did not finish");
+        const auto failedChecks = QJsonDocument::fromJson(report->toPlainText().toUtf8()).object()["checks"].toObject();
+        check(failedChecks["capabilities"].toObject()["read"] == false &&
+              failedChecks["capabilities"].toObject()["exit_code"] == 87 &&
+              failedChecks["standard_vcp_reads"].toObject()["0x10"].toObject()["read"] == true &&
+              !report->toPlainText().contains("PRIVATE"),
+              "Capability failure lost successful reads, leaked output or fabricated support");
         // Restore the switch fixture for subsequent tests.
         check(diagnosticsBackend.open(QIODevice::WriteOnly | QIODevice::Truncate), "Could not restore backend fixture");
         diagnosticsBackend.write(("#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + log + "'\n").toUtf8());

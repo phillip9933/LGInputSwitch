@@ -10,6 +10,7 @@ struct DiagnosticSnapshot
 
 // Only explicitly selected, bounded numeric controls are included in the report.
 QJsonObject ParseDiagnosticVcp(const QByteArray &output, unsigned int feature);
+QJsonObject ParseDiagnosticCapabilities(const QByteArray &response);
 QJsonObject CollectDesktopDiagnostics(const DiagnosticSnapshot &snapshot, bool preview);
 QString FormatDesktopDiagnostics(const DiagnosticSnapshot &snapshot, const QJsonObject &checks, bool preview);
 bool SaveDesktopDiagnostics(const QString &path, const QString &report, QString &error);
