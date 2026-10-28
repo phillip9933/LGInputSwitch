@@ -8,7 +8,7 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-The [1.1.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.1.0) contains a native `.pkg.tar.zst` package, its corresponding
+The [1.2.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.2.0) contains a native `.pkg.tar.zst` package, its corresponding
 source archive, PKGBUILD, source revision and SHA256SUMS. Download the package, source and SHA256SUMS from the release. CI also provides the
 `LGInputSwitch-CachyOS-Arch` artifact. This is
 not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
@@ -31,6 +31,10 @@ Launch **LG Input Switch** from the application menu. Select your monitor, revie
 the enabled input mappings and save. Switch only to inputs whose codes are known
 for that monitor. A success message means the command was sent; no extra readback
 is attempted after switching away from this host.
+
+For support, use **Diagnostics → Create report**, review it, then copy or save it
+with your issue. The report includes read-only checks and advertised controls/input
+values for the selected monitor; it does not change settings or upload anything.
 
 In Preferences, enable global shortcuts and save. KDE System Settings → Keyboard
 → Shortcuts → Applications → LG Input Switch contains Cycle inputs, Previous

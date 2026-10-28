@@ -56,8 +56,8 @@ END
 IDI_APPICON ICON "app.ico"
 
 1 VERSIONINFO
-FILEVERSION 1,1,0,0
-PRODUCTVERSION 1,1,0,0
+FILEVERSION 1,2,0,0
+PRODUCTVERSION 1,2,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0
 FILEOS VOS_NT_WINDOWS32
@@ -70,9 +70,9 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "phillip9933"
             VALUE "FileDescription", "LG Input Switch"
-            VALUE "FileVersion", "1.1.0"
+            VALUE "FileVersion", "1.2.0"
             VALUE "ProductName", "LG Input Switch"
-            VALUE "ProductVersion", "1.1.0"
+            VALUE "ProductVersion", "1.2.0"
             VALUE "LegalCopyright", "Copyright (c) 2025-2026 phillip9933 and contributors"
         END
     END

@@ -159,7 +159,7 @@ LGInputSwitchDesktop --preview --screenshot-dir previews
 
 Preview mode never loads/saves user config, registers shortcuts, discovers hardware
 or sends monitor commands. It renders synthetic monitor data in both palettes,
-all three tabs and tray menus. Do not interpret the synthetic monitor as a support
+all four tabs and tray menus. Do not interpret the synthetic monitor as a support
 claim. Qt offscreen mode (`QT_QPA_PLATFORM=offscreen`) can render it in CI.
 
 Local Linux checks cover both palettes, visible rows, preview isolation, fake

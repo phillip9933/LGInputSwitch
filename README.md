@@ -1,12 +1,12 @@
 # LG Input Switch
 
-## Roadmap and work
+## Development and support
 
-[Windows release scope](https://github.com/phillip9933/LGInputSwitch/issues/8) · [Open work](https://github.com/phillip9933/LGInputSwitch/issues) · [Issue conventions](CONTRIBUTING.md#public-roadmap-and-issue-management)
+[Open issues](https://github.com/phillip9933/LGInputSwitch/issues) · [Intel/NVIDIA work](https://github.com/phillip9933/LGInputSwitch/issues/12) · [Contributing](CONTRIBUTING.md)
 
-The previous board links pointed to another project (Kura). LGInputSwitch currently has no linked public project; use the issue list until a dedicated board is configured.
-
-Follow release scope and maturity separately from individual work. Dates are estimates; unscheduled ideas have no release milestone.
+For troubleshooting, open the modern app's **Diagnostics → Create report**, review
+it, then copy or save it with your issue. Compatibility information comes from
+voluntary owner reports; advertised controls do not guarantee switching support.
 
 Originally a small Windows tray utility that switches **LG monitor inputs** (DisplayPort / USB-C / HDMI1 / HDMI2) on **AMD GPUs** using **DDC/CI over I²C**, with configurable hotkeys, a settings dialog, first-run welcome, and a dynamic tray menu.
 
@@ -25,7 +25,7 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 
 ## Download / Run (Windows)
 
-Download [version 1.1.0](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.1.0).
+Download [version 1.2.0](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.2.0).
 Use the Windows x64 ZIP for the modern app or the legacy ZIP for the Win32 frontend.
 See [installation, upgrades and runtime setup](docs/windows-release.md).
 
@@ -54,7 +54,7 @@ See [code review and verification](docs/maintenance-review.md) and the [cross-pl
 ## Linux CLI
 
 An initial CLI uses the installed `ddcutil` tool and the shared command-value
-validation. This is a development preview; A shared Qt tray/settings GUI and linked KDE Plasma shortcuts are now available
+validation. A shared Qt tray/settings GUI and linked KDE Plasma shortcuts are now available
 as a Linux version; see [Linux installation](docs/linux-install.md). Windows JSON is not migrated or read by this CLI.
 
 Build with a C++17 compiler and CMake:
@@ -101,8 +101,7 @@ COPYRIGHT.md
 ---
 
 ## Credits & Licenses
-- **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  This project is essentially a
-  project began as a tray wrapper around that approach. Version 1.1.0 replaces
+- **amildahl/amdddc-windows** — Original CLI and approach for AMD+LG I²C input switching.  The project began as a tray wrapper around that approach. Version 1.1.0 replaces
   the inherited implementation with new API/session/packet code and retains this credit.
   https://github.com/amildahl/amdddc-windows
 - **nlohmann/json** — MIT  
@@ -129,8 +128,7 @@ light and dark appearance modes. Build with Qt 6.5+ using
 `cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON`, then
 `cmake --build build-desktop --config Release`. See [desktop setup, preview and
 limitations](docs/desktop-ui.md). The Linux GUI uses ddcutil. KDE Plasma builds with KGlobalAccel can record and
-register shortcuts directly in the app; other desktops retain the CLI fallback. Real OS theme/tray and hardware
-validation is required before replacing the existing Windows frontend.
+register shortcuts directly in the app; other desktops retain the CLI fallback. Known platform and hardware limitations are documented in the release notes.
 
 
 CachyOS/KDE Wayland testing has verified monitor switching, the tray/settings UI
@@ -139,4 +137,4 @@ input shortcuts. [Install the native Arch/CachyOS package](docs/linux-install.md
 or build from source. Windows packages include both the modern and legacy frontends. Physical Windows
 hardware validation remains limited; see the release notes.
 
-See [release notes](docs/releases/1.1.0.md) and [publication workflow](docs/release-candidate.md).
+See [release notes](docs/releases/1.2.0.md) and [publication workflow](docs/release-candidate.md).

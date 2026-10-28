@@ -1,6 +1,6 @@
-# LG Input Switch 1.1.0 — Windows x64
+# LG Input Switch 1.2.0 — Windows x64
 
-Download `LGInputSwitch-1.1.0-Windows-x64.zip` from the numeric `1.1.0` release.
+Download `LGInputSwitch-1.2.0-Windows-x64.zip` from the numeric `1.2.0` release.
 Extract the complete ZIP to a writable folder in your user profile. Keep the
 folders, DLLs and notices beside `LGInputSwitchDesktop.exe`; start that executable.
 Windows currently requires an AMD GPU/driver. Intel/NVIDIA backends and macOS
@@ -20,6 +20,11 @@ shortcuts, notifications, system/light/dark appearance and start-on-sign-in.
 Previous input remembers accepted selections in this session, not the initial
 physical input. A success notification means the command was sent without readback.
 
+For troubleshooting, open **Diagnostics → Create report**, review it, then copy or
+save it with your issue. It includes the last command, read-only monitor checks,
+advertised controls/input values and system/build details. No input is switched
+and nothing is uploaded automatically. See [diagnostic details](desktop-ui.md#built-in-diagnostics).
+
 ## Upgrade and legacy frontend
 
 Quit any older LGInputSwitch before upgrading. Back up its config.json, then copy
@@ -29,7 +34,7 @@ additional configured targets are retained when saving. Its appearance and
 previous/disabled-row preferences are stored per-user by Qt. Restore your backed-up
 config and old executable to roll back. Do not extract over a running executable.
 
-`LGInputSwitch-1.1.0-Windows-legacy-x64.zip` contains the original Win32 frontend
+`LGInputSwitch-1.2.0-Windows-legacy-x64.zip` contains the original Win32 frontend
 with maintenance fixes, for users who prefer it. Run only one frontend at a time:
 they share config.json conventions, the Windows startup entry and global keys.
 Both folders must remain writable for config.json. Windows Startup Apps may
@@ -58,7 +63,7 @@ Windows bundle omits the optional Mesa software-OpenGL DLL and Microsoft shader
 compiler; this app uses raster Widgets and does not require Qt Quick/OpenGL.
 
 Corresponding application source and build/packaging scripts are attached as
-`LGInputSwitch-1.1.0-source.tar.gz`. SOURCE_REVISION identifies the exact tested
+`LGInputSwitch-1.2.0-source.tar.gz`. SOURCE_REVISION identifies the exact tested
 Git commit. BUILD-INFO.json records the Qt source hashes and runtime-installer hash;
 MANIFEST.json hashes the extracted bundle files. The release-level SHA256SUMS
 covers all downloadable application/dependency source and package assets.
