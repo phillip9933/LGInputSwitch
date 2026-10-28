@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "process.h"
 #ifdef Q_OS_WIN
 #include "../platform/windows/adl_session.h"
 #include "../app/app_config.h"
@@ -193,22 +194,18 @@ Discovery DiscoverDesktopMonitors()
             ReleaseAdlMemory(reinterpret_cast<void **>(&info));
     }
 #else
-    QProcess process;
-    process.setProcessChannelMode(QProcess::MergedChannels);
-    process.start("ddcutil", {"detect", "--brief"});
-    if (!process.waitForStarted(3000))
+    const auto probe = RunDesktopProcess("ddcutil", {"detect", "--brief"}, 15000);
+    if (probe.status == "unavailable")
     {
         result.message = "ddcutil is unavailable. Install it using your distribution's package manager.";
         return result;
     }
-    if (!process.waitForFinished(15000))
+    if (probe.status == "timed out")
     {
-        process.kill();
-        process.waitForFinished();
         result.message = "Monitor discovery timed out. Check device access, then try again.";
         return result;
     }
-    const QString output = QString::fromLocal8Bit(process.readAll());
+    const QString output = QString::fromLocal8Bit(probe.output);
     DesktopMonitor current;
     auto append = [&] {
         if (current.display >= 0)
@@ -243,7 +240,7 @@ Discovery DiscoverDesktopMonitors()
     for (auto &monitor : result.monitors)
         monitor.label += monitor.bus ? QString(" · I²C %1").arg(monitor.display)
                                      : QString(" · Display %1").arg(monitor.display);
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+    if (probe.status != "finished" || probe.exitCode != 0)
     {
         result.monitors.clear();
         result.message = output.trimmed().left(1200);
