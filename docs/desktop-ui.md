@@ -295,3 +295,9 @@ results, external shortcut updates and disconnected members. Theme previews incl
 single-monitor and grouped configurations. Windows CI builds the same editor and
 runs synthetic profile/preview tests; its fake AMD driver tests the optional EDID
 entry point. This does not establish physical Windows multi-monitor compatibility.
+
+A live-session `kde_window_probe` uses only an isolated test component and a fake
+ddcutil executable. It checks the migrated cycle action and separately named
+group cycle/direct actions against the running shortcut daemon, then removes
+its assignments. Offscreen rendering can be used for this daemon check without
+sending keyboard events or physical-monitor commands.

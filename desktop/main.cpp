@@ -105,7 +105,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
     void dirty()
     {
-        if (populating_)
+        if (populating_ || dirty_)
             return;
         dirty_ = true;
         save_->setText("Save changes");
@@ -1145,6 +1145,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         removeProfile_->setEnabled(!busy_ && draft_.profiles.size() > 1);
         addProfile_->setEnabled(!busy_ && draft_.profiles.size() < 32);
         addMonitor_->setEnabled(!busy_ && active().monitors.size() < 16);
+        for (auto *action : menu_->actions())
+            if (action->menu())
+                action->menu()->deleteLater();
         menu_->clear();
         connect(menu_->addAction("Open LG Input Switch"), &QAction::triggered, this,
                 [this] { showWindow(); });
