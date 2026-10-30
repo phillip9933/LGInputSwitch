@@ -26,6 +26,48 @@ static bool waitUntil(const std::function<bool()> &predicate)
 
 struct DesktopWindowProbe
 {
+    static void compactLayout(DesktopWindow &window)
+    {
+        const auto originalSize = window.size();
+        const int originalPage = window.tabs_->currentIndex();
+        const bool originalEditing = window.editProfile_->isChecked();
+        for (const auto &requested : {QSize(640, 480), QSize(800, 600)})
+            for (bool editing : {false, true})
+            {
+                window.editProfile_->setChecked(editing);
+                window.resize(requested);
+                QCoreApplication::processEvents();
+                check(window.size() == requested, "Window refuses a laptop-sized viewport");
+                for (int page = 0; page < window.tabs_->count(); ++page)
+                {
+                    window.tabs_->setCurrentIndex(page);
+                    QCoreApplication::processEvents();
+                    const auto save = QRect(window.save_->mapTo(&window, QPoint()), window.save_->size());
+                    const auto controls =
+                        QRect(window.controls_->mapTo(&window, QPoint()), window.controls_->size());
+                    const auto status =
+                        QRect(window.status_->mapTo(&window, QPoint()), window.status_->size());
+                    check(window.rect().contains(save) && controls.bottom() < status.top() &&
+                              status.bottom() < save.top(),
+                          "Page/status/footer overlap at compact size");
+                    check(window.monitorCard_->isVisibleTo(&window) == (page == 0),
+                          "Profile monitor controls remain on a global settings page");
+                    if (page == 0 && editing)
+                    {
+                        check(window.profileScroll_->verticalScrollBar()->maximum() > 0,
+                              "Compact profile editing compresses content instead of scrolling");
+                        window.profileScroll_->verticalScrollBar()->setValue(
+                            window.profileScroll_->verticalScrollBar()->maximum());
+                        QCoreApplication::processEvents();
+                        check(window.save_->isVisible(), "Scrolling hides global Save settings");
+                    }
+                }
+            }
+        window.tabs_->setCurrentIndex(originalPage);
+        window.editProfile_->setChecked(originalEditing);
+        window.resize(originalSize);
+        QCoreApplication::processEvents();
+    }
     static void run(DesktopWindow &window, const QString &temp, const QString &log, const QString &failMarker,
                     const QString &missingMarker)
     {
@@ -33,9 +75,9 @@ struct DesktopWindowProbe
               "Async discovery failed");
         check(window.draft_.profiles.size() == 1 && window.draft_.profiles[0].actions.size() == 2,
               "Legacy Linux migration lost inputs");
-        check(window.members_->cellWidget(0, 1) &&
-                  qobject_cast<QComboBox *>(window.members_->cellWidget(0, 1))->currentIndex() == -1,
-              "Discovery silently chose a monitor");
+        check(window.members_->findChildren<QComboBox *>().isEmpty() &&
+                  window.members_->item(0, 1)->text() == "Connection needed",
+              "Monitor row still offers an ambiguous selector or silently chose a monitor");
         window.selectConnection("monitor-1", 0);
         window.save();
         check(!window.dirty_, "Initial profile did not save");
@@ -69,6 +111,16 @@ struct DesktopWindowProbe
         window.dirty();
         window.save();
         check(!window.dirty_, "Group configuration failed to save");
+        QTimer::singleShot(0, &window, [&window] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            check(dialog != nullptr, "Reconnect dialog missing");
+            auto *choice = dialog->findChild<QComboBox *>("reconnectChoice");
+            check(choice && choice->count() == 1 && choice->itemData(0).toInt() == 0,
+                  "Reconnect offers a connection assigned to another saved monitor");
+            dialog->accept();
+        });
+        window.reconnectMonitor("monitor-1");
+        window.save();
         // Dispatch a group while the single-monitor tab remains visible.
         window.sendInput("group", "linux");
         check(waitUntil([&] { return !window.busy_; }), "Grouped async send did not finish");
@@ -120,6 +172,13 @@ struct DesktopWindowProbe
         check(waitUntil([&] { return !window.busy_; }), "Other profile send failed");
         check(window.session_.state("group").currentAction.isEmpty() && !window.retry_->isEnabled(),
               "Other tab retained stale shared history");
+        window.syncShortcut("group", "linux", QKeySequence("Ctrl+Alt+F10"));
+        const int shortcutColumn = 2 + window.active().monitors.size();
+        check(window.table_->item(0, shortcutColumn)->data(Qt::UserRole).toString() == "CTRL+ALT+F10",
+              "Read-only shortcut display did not synchronize");
+        window.captureDraft();
+        check(window.active().actions[0].shortcut == "CTRL+ALT+F10",
+              "View collection overwrote the external shortcut");
         // External Plasma changes must persist to the right profile without
         // overwriting a dirty form on any tab.
         window.table_->item(0, 1)->setText("Draft group name");
@@ -164,6 +223,7 @@ struct DesktopWindowProbe
         check(reloaded.profiles.size() == 2 && reloaded.monitors.size() == 2 &&
                   reloaded.monitors[1].method == "standard",
               "Saved workspace lost shared monitor settings");
+        compactLayout(window);
         Q_UNUSED(temp);
         Q_UNUSED(secondAction);
     }
@@ -221,6 +281,10 @@ int main(int argc, char **argv)
         appearance->setCurrentIndex(appearance->findData("light"));
         app.processEvents();
         check(app.palette().color(QPalette::Window).lightness() > 220, "Light palette not applied");
+        check(!table->cellWidget(0, 2) && table->item(0, 2)->text() == "DisplayPort" &&
+                  table->isColumnHidden(0),
+              "Normal switching view still exposes input editors");
+        preview.findChild<QPushButton *>("editProfile")->setChecked(true);
         auto *input = qobject_cast<QComboBox *>(table->cellWidget(0, 2));
         check(input && !input->currentText().contains("0x"), "Codes unexpectedly exposed by default");
         check(table->visualItemRect(table->item(3, 1)).bottom() <= table->viewport()->height(),
@@ -241,6 +305,16 @@ int main(int argc, char **argv)
         profiles->setCurrentIndex(2);
         app.processEvents();
         check(table->item(0, 1)->text() == "Unsaved group label", "Tab switch discarded group draft");
+        auto *navigation = preview.findChild<QTabWidget *>("mainTabs");
+        check(navigation->tabText(0) == "Profiles", "Global navigation is not above the profile page");
+        navigation->setCurrentIndex(3);
+        auto *diagnosticProfile = preview.findChild<QComboBox *>("diagnosticProfile");
+        diagnosticProfile->setCurrentIndex(0);
+        app.processEvents();
+        check(profiles->currentIndex() == 0 && table->item(0, 1)->text() == "Unsaved label",
+              "Diagnostics profile selector lost draft edits or changed the wrong target");
+        diagnosticProfile->setCurrentIndex(2);
+        app.processEvents();
         auto *diagnosticRun = preview.findChild<QPushButton *>("diagnosticRun");
         auto *report = preview.findChild<QPlainTextEdit *>("diagnosticReport");
         diagnosticRun->click();
@@ -251,6 +325,7 @@ int main(int argc, char **argv)
         check(report->toPlainText().contains("no settings or hardware accessed") &&
                   !report->toPlainText().contains("Unsaved"),
               "Preview report used hardware or leaked labels");
+        navigation->setCurrentIndex(0);
         auto *status = preview.findChild<QLabel *>("status");
         qobject_cast<QPushButton *>(table->cellWidget(0, table->columnCount() - 1))->click();
         check(status->text().contains("preview", Qt::CaseInsensitive), "Preview attempted a live operation");
@@ -271,6 +346,7 @@ int main(int argc, char **argv)
         check(table->columnCount() == 6 &&
                   qobject_cast<QComboBox *>(table->cellWidget(0, 3))->currentIndex() == -1,
               "Add monitor guessed a group input instead of requesting selection");
+        DesktopWindowProbe::compactLayout(preview);
         preview.close();
     }
 #ifndef Q_OS_WIN

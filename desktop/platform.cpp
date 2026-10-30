@@ -246,7 +246,7 @@ Discovery DiscoverDesktopMonitors()
         result.message =
             result.monitors.isEmpty()
                 ? "No controllable monitors found. Check the cable, graphics driver and DDC/I2C access."
-                : QString("%1 monitor(s) available. Select the display you want to control.")
+                : QString("%1 monitor(s) available. Use Connect on a saved monitor if needed.")
                       .arg(result.monitors.size());
     return result;
 }

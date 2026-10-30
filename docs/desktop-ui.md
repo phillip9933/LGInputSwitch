@@ -19,24 +19,47 @@ This section describes the current development checkout. The published 1.2.0
 release has the earlier single-monitor editor; the legacy Win32 frontend and
 standalone Linux CLI retain their existing single-target behavior.
 
-The **Monitors & profiles** card contains named tabs. **+ Profile** creates an
-independent action list using an existing saved monitor, without copying its
-shortcuts. Rename/remove buttons manage the selected tab. Switching tabs keeps
-unsaved form edits; **Save settings** saves the entire workspace. Unsaved changes
-block all switching, including native keys and tray actions, until saved.
+The top navigation contains **Profiles**, **Preferences**, **Advanced** and
+**Diagnostics**. App-wide settings are separate pages; monitor controls appear
+only on Profiles. Pages scroll at smaller sizes while status and Save settings
+stay outside the scrolling content. The default window is 1000×740 and supports
+620×460; large action tables also have their own scrolling.
 
-1. Select the connection for the first monitor. Use **Edit → Edit monitor &
-   inputs** to name it and review its input names/codes and source address.
-2. Use **+ Monitor** to attach another saved monitor or a newly detected one.
-   A saved monitor has one input mapping shared by every profile using it.
-3. Name actions such as **Linux PC** and **Windows PC**. Choose one input for
-   **every** assigned monitor in each row. New group members have no guessed
-   input assignment; select the mappings before saving.
-4. Enable the actions you want, reorder them with Move up/down, and optionally
-   record direct, cycle and previous shortcuts. **+ Action** adds a custom action.
-5. Save, then use a row's **Switch**, **Cycle inputs**, **Previous input**, a
-   profile's tray submenu or its shortcut. The selected GUI tab does not change
-   which profile a shortcut controls.
+On **Profiles**, named profile tabs sit above a monitor-status summary and a
+read-only switching table. **Manage monitors** reveals connection details, the
++ Monitor button and Refresh; the section opens automatically when a monitor
+newly needs a connection. Disabled actions are hidden in this normal view.
+Use **Edit actions** to show enabled checkboxes, input selectors, shortcut
+recorders, and action-management controls. **Done editing** returns to switching
+view and keeps the draft; **Save settings** commits the entire workspace. Tab/page
+changes retain drafts. Unsaved changes block switching, including native keys
+and tray actions, until saved.
+
+1. Use **Connect…** for a monitor needing a connection. Connected rows show status
+   and their detected route as text. A row’s **… → Reconnect…** opens an explicit
+   binding dialog; connections assigned to another saved monitor are excluded.
+   The dialog can refresh discovery. This updates the saved monitor in all its
+   profiles; to use another saved monitor in this profile, use **+ Monitor**.
+2. Expand **Manage monitors**, then use **… → Edit monitor & inputs…** to name a monitor and review its method,
+   input names/codes and source address. These mappings are shared by every
+   profile using that saved monitor.
+3. Use **+ Profile** for an independent action list without copied shortcuts.
+   The adjacent profile-options **…** menu contains Rename/remove. **+ Monitor**
+   attaches another saved or newly detected monitor and opens action editing.
+4. In **Edit actions**, name actions such as **Linux PC** and **Windows PC**.
+   Choose an input for every assigned monitor in every action. New members
+   have no guessed input assignment. **+ Action** adds rows; select a row and
+   use **Action options** to move or remove it. Cycle/previous shortcut fields
+   are also shown here. Native shortcut changes from Plasma update the read-only
+   shortcut display without discarding drafts.
+5. Save, then use a row’s **Switch**, **Cycle inputs**, **Previous input**, a
+   profile’s tray submenu or its shortcut. A failed group reveals **Retry failed
+   monitors** and per-monitor results. The selected GUI tab never changes which
+   profile a shortcut controls.
+
+**Diagnostics** has its own **Report for** profile selector, linked to the profile
+tabs. It makes the report target explicit while keeping the diagnostic tools on
+an app-level page.
 
 For example, a Linux PC action can send DisplayPort on the main monitor and
 HDMI on the side monitor. Commands run on the serialized background worker, so
@@ -301,3 +324,9 @@ ddcutil executable. It checks the migrated cycle action and separately named
 group cycle/direct actions against the running shortcut daemon, then removes
 its assignments. Offscreen rendering can be used for this daemon check without
 sending keyboard events or physical-monitor commands.
+
+Compact-layout regressions exercise 640×480 and 800×600 in both switching and
+editing modes, across all global pages, including visible failed-monitor results.
+They verify scrolling and separation of content, status and footer controls.
+Reconnect regressions ensure another saved monitor’s connection is not offered.
+Theme previews include compact editing and the normal switching view.
