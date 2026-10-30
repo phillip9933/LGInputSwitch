@@ -1,6 +1,7 @@
 #include "../core/input_value.h"
 #include "diagnostics.h"
 #include "kde_shortcuts.h"
+#include "monitor_inputs.h"
 #include "profiles.h"
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
@@ -41,6 +42,12 @@ static QIcon MonitorIcon()
     }
     return icon;
 }
+
+struct MonitorSetup
+{
+    Discovery discovery;
+    QVector<QPair<QString, MonitorInputRead>> inputs;
+};
 
 class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 {
@@ -221,7 +228,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         confirmed_[id] = target;
         dirty();
         populateMembers();
-        message("Connection selected. Save settings before switching.");
+        message("Connection selected. Reading this monitor’s inputs…");
+        scanInputs(false, {id});
     }
     void reconnectMonitor(const QString &id)
     {
@@ -328,7 +336,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             const auto connection =
                 resolved.available ? "Connected · " + resolved.target.label : "Connection needed";
             auto *status = new QTableWidgetItem(connection);
-            status->setToolTip(resolved.available ? resolved.target.label : resolved.reason);
+            status->setToolTip((resolved.available ? resolved.target.label : resolved.reason) +
+                               (m->inputStatus.isEmpty() ? "" : "\n" + m->inputStatus));
             members_->setItem(row, 1, status);
             auto *button = new QToolButton;
             button->setText(resolved.available ? "…" : "Connect…");
@@ -535,9 +544,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     {
         captureDraft();
         QDialog dialog(this);
-        dialog.setWindowTitle("Add monitor to “" + active().name + "”");
+        dialog.setWindowTitle("Add monitor");
+        dialog.setMinimumSize(540, 300);
+        dialog.resize(640, 340);
         auto *layout = new QVBoxLayout(&dialog);
         auto *choice = new QComboBox;
+        choice->setObjectName("addMonitorChoice");
+        choice->setMinimumContentsLength(24);
+        choice->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         for (const auto &m : draft_.monitors)
             if (!active().monitors.contains(m.id))
                 choice->addItem("Saved: " + m.name, m.id);
@@ -559,8 +573,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             message("No other monitors available. Connect a monitor and click Refresh.");
             return;
         }
-        auto *hint = new QLabel("Reuse a saved monitor to share its input mapping across profiles.\nChoose "
-                                "each action’s input for the added monitor before saving.");
+        auto *hint = new QLabel("Add a monitor to “" + active().name +
+                                "”. The app reads that monitor’s advertised inputs automatically. Saved "
+                                "monitors reuse their existing configuration.");
+        hint->setTextFormat(Qt::PlainText);
+        hint->setObjectName("addMonitorHint");
         hint->setWordWrap(true);
         layout->addWidget(hint);
         layout->addWidget(choice);
@@ -580,7 +597,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         if (dialog.exec() != QDialog::Accepted)
             return;
         QString id;
-        if (choice->currentData().metaType().id() == QMetaType::QString)
+        const bool newMonitor = choice->currentData().metaType().id() != QMetaType::QString;
+        if (!newMonitor)
             id = choice->currentData().toString();
         else
         {
@@ -613,13 +631,20 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         }
         active().monitors.push_back(id);
         for (auto &a : active().actions)
-            a.inputs[id] = {}; // require an explicit per-monitor mapping
+        {
+            a.inputs[id] = {};
+            for (const auto &input : FindMonitor(draft_, id)->inputs)
+                if (InputNameKey(a.name) == InputNameKey(input.label))
+                    a.inputs[id] = input.id;
+        }
         {
             const QSignalBlocker block(editProfile_);
             editProfile_->setChecked(true);
         }
         populateProfile();
         dirty();
+        if (newMonitor)
+            scanInputs(false, {id});
     }
     void editMonitor(const QString &id)
     {
@@ -659,6 +684,10 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         methodHint->setWordWrap(true);
         form->addRow(methodHint);
         layout->addLayout(form);
+        auto *automatic = new QCheckBox("Read and set up this monitor’s inputs automatically");
+        automatic->setObjectName("automaticMonitorInputs");
+        automatic->setChecked(next.autoInputs);
+        form->addRow(automatic);
         auto *inputs = new QTableWidget(0, 2);
         inputs->setObjectName("monitorInputs");
         inputs->setHorizontalHeaderLabels({"Input name", "Code"});
@@ -747,77 +776,71 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 error->setText("Select this monitor’s connection before reading advertised inputs.");
                 return;
             }
-            DiagnosticSnapshot snapshot;
-            snapshot.selected = true;
-            snapshot.config.adapter = resolution.target.adapter;
-            snapshot.config.display = resolution.target.display;
-            snapshot.config.bus = resolution.target.bus;
+            auto query = next;
+            query.method = method->currentData().toString();
             advertised->setEnabled(false);
-            error->setText("Reading advertised inputs. No switching commands are sent…");
-            auto *watcher = new QFutureWatcher<QJsonObject>(&dialog);
-            const auto selectedMethod = method->currentData().toString();
+            error->setText("Reading this monitor’s advertised inputs…");
             method->setEnabled(false);
-            connect(
-                watcher, &QFutureWatcher<QJsonObject>::finished, &dialog,
-                [&, watcher, append, selectedMethod] {
-                    const auto checks = watcher->result();
-                    watcher->deleteLater();
-                    advertised->setEnabled(true);
-                    method->setEnabled(true);
-                    QJsonObject caps;
-#ifdef Q_OS_WIN
-                    // Windows diagnostic APIs do not establish a mapping between
-                    // native handles and AMD display indices. Never import another
-                    // display's advertised values under an assumed association.
-                    error->setText(
-                        "Use the Diagnostics report to review Windows advertised values, then add the "
-                        "matching monitor’s inputs manually. No native-to-AMD mapping is assumed.");
-                    return;
-#else
-                caps = checks["capabilities"].toObject();
-#endif
-                    const auto values = caps["advertised_input_values"]
-                                            .toObject()[selectedMethod == "standard" ? "0x60" : "0xf4"]
-                                            .toObject()["values"]
-                                            .toArray();
-                    int added = 0;
-                    for (const auto &value : values)
+            auto *watcher = new QFutureWatcher<MonitorInputRead>(&dialog);
+            connect(watcher, &QFutureWatcher<MonitorInputRead>::finished, &dialog, [&, watcher, append] {
+                const auto read = watcher->result();
+                watcher->deleteLater();
+                advertised->setEnabled(true);
+                method->setEnabled(true);
+                if (read.complete)
+                {
+                    if (automatic->isChecked())
                     {
-                        const auto entry = value.toObject();
-                        const auto code = entry["code"].toString();
-                        unsigned int wanted;
-                        if (!ParseInputValue(code.toStdString(), 0xffff, wanted))
-                            continue;
-                        bool exists = false;
-                        for (int i = 0; i < inputs->rowCount(); ++i)
-                        {
-                            unsigned int current;
-                            if (ParseInputValue(inputs->item(i, 1)->text().toStdString(), 0xffff, current) &&
-                                current == wanted)
-                                exists = true;
-                        }
-                        if (!exists && inputs->rowCount() < 64)
-                        {
-                            append({entry["standard_name"].toString("Input " + code),
-                                    code,
-                                    {},
-                                    true,
-                                    NewDesktopId()});
-                            ++added;
-                        }
+                        auto workspace = draft_;
+                        for (auto &m : workspace.monitors)
+                            if (m.id == id)
+                            {
+                                m.autoInputs = true;
+                                m.method = method->currentData().toString();
+                            }
+                        ApplyMonitorInputs(workspace, id, read);
+                        const auto *detected = FindMonitor(workspace, id);
+                        inputs->setRowCount(0);
+                        for (const auto &input : detected->inputs)
+                            append(input);
                     }
-                    error->setText(QString("%1 advertised input(s) added. Existing mappings were kept. "
-                                           "Advertised values do not guarantee switching support.")
-                                       .arg(added));
-                });
+                    else
+                        for (auto input : read.inputs)
+                        {
+                            unsigned int wanted;
+                            if (!ParseInputValue(input.code.toStdString(), 0xffff, wanted))
+                                continue;
+                            bool exists = false;
+                            for (int i = 0; i < inputs->rowCount(); ++i)
+                            {
+                                unsigned int current;
+                                if (ParseInputValue(inputs->item(i, 1)->text().toStdString(), 0xffff,
+                                                    current) &&
+                                    current == wanted)
+                                    exists = true;
+                            }
+                            if (!exists && inputs->rowCount() < 64)
+                            {
+                                input.id = NewDesktopId();
+                                append(input);
+                            }
+                        }
+                }
+                error->setText(read.status);
+            });
             watcher->setFuture(QtConcurrent::run(
-                &worker_, [snapshot] { return CollectDesktopDiagnostics(snapshot, false); }));
+                &worker_, [query, target = resolution.target] { return ReadMonitorInputs(query, target); }));
         });
-#ifdef Q_OS_WIN
-        advertised->setEnabled(false);
-        advertised->setToolTip("Review Diagnostics and add codes manually; native and AMD display "
-                               "identifiers have no verified mapping.");
-#endif
+        auto editingState = [=] {
+            inputs->setEditTriggers(automatic->isChecked() ? QAbstractItemView::NoEditTriggers
+                                                           : QAbstractItemView::DoubleClicked |
+                                                                 QAbstractItemView::EditKeyPressed);
+            add->setEnabled(!automatic->isChecked());
+            remove->setEnabled(!automatic->isChecked());
+            presets->setEnabled(!automatic->isChecked());
+        };
+        connect(automatic, &QCheckBox::toggled, &dialog, editingState);
+        editingState();
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         layout->addWidget(buttons);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -825,6 +848,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             next.name = name->text().trimmed();
             next.source = source->text().trimmed();
             next.method = method->currentData().toString();
+            next.autoInputs = automatic->isChecked();
             next.inputs.clear();
             QSet<QString> labels;
             unsigned int value;
@@ -869,11 +893,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             for (auto &profile : draft_.profiles)
                 for (auto &action : profile.actions)
                     if (action.inputs.contains(id) && !FindMonitorInput(next, action.inputs.value(id)))
+                    {
                         action.inputs[id] = {};
+                        action.enabled = false;
+                    }
             populateProfile();
             dirty();
         }
         updateActions();
+        if (accepted && next.autoInputs)
+            scanInputs(false, {id});
     }
     void manageMonitors()
     {
@@ -934,6 +963,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
     void save()
     {
+        if (busy_)
+        {
+            message("Wait for monitor input detection to finish before saving.");
+            return;
+        }
         if (preview_)
         {
             message("Design preview · nothing is saved and no monitor commands are sent.");
@@ -1218,21 +1252,56 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         updateActions();
     }
     QMap<QString, ProfileSwitchResult> lastResults_;
+    void scanInputs(bool discover, const QStringList &only = {})
+    {
+        if (busy_ || preview_)
+            return;
+        captureDraft();
+        const auto snapshot = draft_;
+        const auto known = discovery_;
+        const auto confirmed = confirmed_;
+        setBusy(true);
+        message(discover ? "Finding monitors and reading their inputs…" : "Reading this monitor’s inputs…");
+        auto *watcher = new QFutureWatcher<MonitorSetup>(this);
+        connect(watcher, &QFutureWatcher<MonitorSetup>::finished, this, [this, watcher] {
+            const auto setup = watcher->result();
+            watcher->deleteLater();
+            discovery_ = setup.discovery;
+            bool changed = false, unavailable = false;
+            for (const auto &entry : setup.inputs)
+            {
+                changed = ApplyMonitorInputs(draft_, entry.first, entry.second) || changed;
+                unavailable = unavailable || !entry.second.complete;
+            }
+            if (changed)
+                dirty();
+            populateProfile();
+            setBusy(false);
+            message(
+                changed ? "Monitor input lists updated. Save settings to apply them. Actions for missing "
+                          "inputs are disabled for review."
+                : unavailable
+                    ? "Some monitors did not report a usable input list. Their existing mappings were kept."
+                : setup.inputs.isEmpty() ? discovery_.message
+                                         : "Each monitor’s input list is up to date.");
+        });
+        watcher->setFuture(QtConcurrent::run(&worker_, [snapshot, known, confirmed, discover, only] {
+            MonitorSetup setup;
+            setup.discovery = discover ? DiscoverDesktopMonitors() : known;
+            for (const auto &m : snapshot.monitors)
+            {
+                if (!m.autoInputs || (!only.isEmpty() && !only.contains(m.id)))
+                    continue;
+                const auto resolved = ResolveSavedMonitor(m, setup.discovery, confirmed);
+                if (resolved.available)
+                    setup.inputs.push_back({m.id, ReadMonitorInputs(m, resolved.target)});
+            }
+            return setup;
+        }));
+    }
     void refresh()
     {
-        if (busy_)
-            return;
-        setBusy(true);
-        message("Looking for connected monitors…");
-        auto *watcher = new QFutureWatcher<Discovery>(this);
-        connect(watcher, &QFutureWatcher<Discovery>::finished, this, [this, watcher] {
-            discovery_ = watcher->result();
-            watcher->deleteLater();
-            populateMembers();
-            setBusy(false);
-            message(discovery_.message);
-        });
-        watcher->setFuture(QtConcurrent::run(&worker_, [] { return DiscoverDesktopMonitors(); }));
+        scanInputs(true);
     }
     DiagnosticSnapshot diagnosticSnapshot()
     {
@@ -1313,7 +1382,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         if (!menu_)
             return;
         const bool usable = !busy_ && !dirty_ && !configurationBlocked_;
-        cycle_->setEnabled(!busy_);
+        bool hasActions = false;
+        for (const auto &action : active().actions)
+            if (action.enabled)
+                hasActions = true;
+        cycle_->setEnabled(!busy_ && hasActions);
         cycle_->setToolTip(active().cycleShortcut.isEmpty() ? "Cycle enabled actions"
                                                             : "Cycle shortcut: " + active().cycleShortcut);
         previous_->setToolTip(active().previousShortcut.isEmpty()
@@ -1342,7 +1415,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 connect(a, &QAction::triggered, this,
                         [this, profileId = p.id, id] { sendInput(profileId, id); });
             };
-            bind("Cycle inputs", "cycle", true);
+            bool enabledActions = false;
+            for (const auto &a : p.actions)
+                if (a.enabled)
+                    enabledActions = true;
+            bind("Cycle inputs", "cycle", enabledActions);
             bind("Previous input", "previous", !session_.previous(p.id).isEmpty());
             const auto pending = session_.state(p.id).pending;
             auto *retry = submenu->addAction("Retry failed monitors");
@@ -2100,6 +2177,19 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 int main(int argc, char **argv)
 {
 #ifdef Q_OS_WIN
+    if (argc == 5 && std::strcmp(argv[1], "--input-probe") == 0)
+    {
+        QCoreApplication app(argc, argv);
+        bool adapterOk = false, displayOk = false;
+        const int adapter = QString::fromLocal8Bit(argv[2]).toInt(&adapterOk);
+        const int display = QString::fromLocal8Bit(argv[3]).toInt(&displayOk);
+        if (!adapterOk || !displayOk)
+            return 2;
+        std::cout << QJsonDocument(ProbeTargetCapabilities(adapter, display, QString::fromLocal8Bit(argv[4])))
+                         .toJson(QJsonDocument::Compact)
+                         .constData();
+        return 0;
+    }
     if (argc == 2 && std::strcmp(argv[1], "--diagnostic-probe") == 0)
     {
         QCoreApplication app(argc, argv);

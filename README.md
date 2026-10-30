@@ -24,7 +24,9 @@ results, failed-monitor retries and profile submenus in the tray are included.
 A monitor's switching method, source address and input-code mapping are shared
 across profiles. Standard DDC/CI Input Source (0x60) is available for Dell and other
 compatible monitors, alongside the existing LG alternate method. Mixed groups are
-supported; Windows switching still requires AMD.
+supported; Windows switching still requires AMD. Each monitor can read and set up
+its own advertised inputs automatically, with custom overrides and safe fallback
+when it does not report a usable list.
 The published **1.2.0** release still has the single-monitor editor. See
 [profile setup and migration](docs/desktop-ui.md#monitor-profiles-development-checkout)
 for the development version.

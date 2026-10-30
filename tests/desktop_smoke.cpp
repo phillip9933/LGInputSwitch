@@ -79,8 +79,40 @@ struct DesktopWindowProbe
                   window.members_->item(0, 1)->text() == "Connection needed",
               "Monitor row still offers an ambiguous selector or silently chose a monitor");
         window.selectConnection("monitor-1", 0);
+        check(waitUntil([&] { return !window.busy_; }), "Automatic connection input read did not finish");
         window.save();
         check(!window.dirty_, "Initial profile did not save");
+        QTimer::singleShot(0, &window, [&window] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            check(dialog && dialog->width() >= 540 && dialog->height() >= 300,
+                  "Add Monitor dialog is too small");
+            auto *hint = dialog->findChild<QLabel *>("addMonitorHint");
+            QCoreApplication::processEvents();
+            const auto required =
+                hint->fontMetrics()
+                    .boundingRect(QRect(0, 0, hint->width(), 10000), Qt::TextWordWrap, hint->text())
+                    .height();
+            check(hint->height() >= required, "Add Monitor explanatory text is clipped");
+            dialog->accept();
+        });
+        window.addMonitor();
+        check(waitUntil([&] { return !window.busy_; }), "New monitor automatic input read did not finish");
+        const auto addedId = window.active().monitors.back();
+        const auto *added = FindMonitor(window.draft_, addedId);
+        check(added && added->inputs.size() == 3 && added->inputs[2].label == "USB-C",
+              "New monitor did not replace generic inputs with its own advertised ports");
+        for (const auto &input : added->inputs)
+            check(!input.label.contains("DisplayPort"), "Phantom DisplayPort remains in Dell input list");
+        check(!QFile::exists(log), "Automatic setup sent a monitor write");
+        window.confirmed_.remove(addedId);
+        window.draft_ = window.saved_;
+        {
+            const QSignalBlocker block(window.editProfile_);
+            window.editProfile_->setChecked(false);
+        }
+        window.populateProfile();
+        window.dirty_ = false;
+        window.updateActions();
         const auto firstProfile = window.saved_.profiles[0].id;
         const auto firstAction = window.saved_.profiles[0].actions[0].id;
         const auto secondAction = window.saved_.profiles[0].actions[1].id;
@@ -93,6 +125,8 @@ struct DesktopWindowProbe
         side.method = "standard";
         side.inputs[0].code = "0x0f";
         side.inputs[1].code = "0x11";
+        side.inputs = side.inputs.mid(0, 2);
+        side.autoInputs = false;
         window.draft_.monitors.push_back(side);
         MonitorProfile group;
         group.id = "group";
@@ -120,6 +154,7 @@ struct DesktopWindowProbe
             dialog->accept();
         });
         window.reconnectMonitor("monitor-1");
+        check(waitUntil([&] { return !window.busy_; }), "Reconnect input read did not finish");
         window.save();
         // Dispatch a group while the single-monitor tab remains visible.
         window.sendInput("group", "linux");
@@ -202,13 +237,15 @@ struct DesktopWindowProbe
             read->click();
             check(waitUntil([&] { return read->isEnabled(); }), "Advertised-input import did not finish");
             auto *inputs = dialog->findChild<QTableWidget *>("monitorInputs");
-            check(inputs->rowCount() == 3,
+            check(inputs->rowCount() == 4,
                   "Advertised input import removed configured inputs or did not append new value");
             dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
         });
         window.editMonitor("synthetic-side");
-        check(window.dirty_ && window.draft_.monitors[1].inputs.size() == 3,
+        check(window.dirty_ && window.draft_.monitors[1].inputs.size() == 4,
               "Monitor editor did not retain advertised inputs");
+        check(waitUntil([&] { return !window.busy_; }),
+              "Automatic input refresh after editing did not finish");
         window.save();
         QFile offline(missingMarker);
         check(offline.open(QIODevice::WriteOnly), "Could not create disconnect fixture");
@@ -343,9 +380,8 @@ int main(int argc, char **argv)
             dialog->accept();
         });
         preview.findChild<QPushButton *>("addMonitor")->click();
-        check(table->columnCount() == 6 &&
-                  qobject_cast<QComboBox *>(table->cellWidget(0, 3))->currentIndex() == -1,
-              "Add monitor guessed a group input instead of requesting selection");
+        check(table->columnCount() == 6 && qobject_cast<QComboBox *>(table->cellWidget(0, 3)) != nullptr,
+              "Add monitor did not expose independent per-monitor mappings");
         DesktopWindowProbe::compactLayout(preview);
         preview.close();
     }
@@ -357,24 +393,26 @@ int main(int argc, char **argv)
     const auto missingMarker = temporary.path() + "/missing-side";
     QFile fake(temporary.path() + "/ddcutil");
     check(fake.open(QIODevice::WriteOnly), "Could not create fake backend");
-    fake.write(("#!/bin/sh\n"
-                "if [ \"$1\" = detect ]; then\n"
-                "printf 'Invalid display\\n I2C bus: /dev/i2c-4\\n Monitor: LCD:Internal:PRIVATE\\n"
-                "Display 1\\n I2C bus: /dev/i2c-29\\n Monitor: GSM:Synthetic main:MAINPRIVATE\\n'\n"
-                "if [ ! -f '" +
-                missingMarker +
-                "' ]; then printf 'Display 2\\n I2C bus: /dev/i2c-31\\n Monitor: GSM:Synthetic "
-                "side:SIDEPRIVATE\\n'; fi\n"
-                "elif [ \"$1\" = --version ]; then echo 'ddcutil 2.2.0'\n"
-                "else\ncase \"$*\" in\n"
-                "*setvcp*) printf '%s\\n' \"$*\" >> '" +
-                log + "'; if [ \"$2\" = 31 ] && [ -f '" + failMarker +
-                "' ]; then exit 87; fi;;\n"
-                "*'getvcp 10 --terse') echo 'VCP 10 C 55 100';;\n"
-                "*'getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n"
-                "*'capabilities --terse') echo '(model(PRIVATE)vcp(10 60(0F 11 12) F4)mccs_ver(2.2))';;\n"
-                "*) exit 92;;\nesac\nfi\n")
-                   .toUtf8());
+    fake.write(
+        ("#!/bin/sh\n"
+         "if [ \"$1\" = detect ]; then\n"
+         "printf 'Invalid display\\n I2C bus: /dev/i2c-4\\n Monitor: LCD:Internal:PRIVATE\\n"
+         "Display 1\\n I2C bus: /dev/i2c-29\\n Monitor: GSM:Synthetic main:MAINPRIVATE\\n'\n"
+         "if [ ! -f '" +
+         missingMarker +
+         "' ]; then printf 'Display 2\\n I2C bus: /dev/i2c-31\\n Monitor: DEL:DELL Synthetic "
+         "side:SIDEPRIVATE\\n'; fi\n"
+         "elif [ \"$1\" = --version ]; then echo 'ddcutil 2.2.0'\n"
+         "else\ncase \"$*\" in\n"
+         "*setvcp*) printf '%s\\n' \"$*\" >> '" +
+         log + "'; if [ \"$2\" = 31 ] && [ -f '" + failMarker +
+         "' ]; then exit 87; fi;;\n"
+         "*'getvcp 10 --terse') echo 'VCP 10 C 55 100';;\n"
+         "*'getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n"
+         "'--bus 31 capabilities --terse') echo '(model(PRIVATE)vcp(10 60(1B 11 12))mccs_ver(2.2))';;\n"
+         "*'capabilities --terse') echo '(model(PRIVATE)vcp(10 60(0F 11 12) F4)mccs_ver(2.2))';;\n"
+         "*) exit 92;;\nesac\nfi\n")
+            .toUtf8());
     fake.close();
     fake.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     qputenv("PATH", temporary.path().toUtf8());

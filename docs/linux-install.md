@@ -61,7 +61,9 @@ rollback, but edits to profiles do not update the older editor's settings.
 
 Use + Profile and + Monitor to configure groups. New monitors can use Standard
 DDC/CI (0x60), including compatible Dell models, or the LG alternate method.
-The monitor editor can append advertised inputs with a read-only query. Select every member's input
+The app reads each monitor’s advertised inputs during setup/startup/Refresh.
+Detected changes require Save settings once; custom mappings can opt out in the
+monitor editor. Missing/unusable lists retain existing values. Select every member's input
 in each action row. KDE's shortcut manager lists the actions under their profile
 names, and existing migrated shortcut IDs are retained. See
 [profile setup and retry behavior](desktop-ui.md#monitor-profiles-development-checkout).

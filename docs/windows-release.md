@@ -52,7 +52,9 @@ moving/upgrading the modern app. The original config.json is preserved for legac
 rollback. The legacy frontend does not support profiles or grouped commands. Per-monitor
 method selection also adds standard DDC/CI input-source commands (0x60), including
 for compatible Dell models, through the existing AMD backend. This does not remove
-the Windows AMD requirement.
+the Windows AMD requirement. Automatic input setup uses a timed, read-only native
+query only when the selected AMD monitor can be uniquely matched by EDID; otherwise
+it keeps the previous mapping. See the desktop UI documentation for custom overrides.
 
 Use + Profile for an independent set of actions, + Monitor to assign displays,
 and each monitor's Edit menu to maintain its shared input-code mapping. One action

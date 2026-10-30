@@ -11,6 +11,8 @@ struct SavedMonitor
     DesktopMonitor route;
     QString source = "0x50", method = "lg";
     QVector<DesktopInput> inputs;
+    bool autoInputs = true;
+    QString inputStatus;
 };
 struct ProfileAction
 {

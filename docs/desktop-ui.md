@@ -47,8 +47,9 @@ and tray actions, until saved.
    The adjacent profile-options **…** menu contains Rename/remove. **+ Monitor**
    attaches another saved or newly detected monitor and opens action editing.
 4. In **Edit actions**, name actions such as **Linux PC** and **Windows PC**.
-   Choose an input for every assigned monitor in every action. New members
-   have no guessed input assignment. **+ Action** adds rows; select a row and
+   Choose an input for every assigned monitor in every action. Port-named actions
+   can match the same detected input name automatically; named PC scenes still
+   need their per-monitor mapping because the app cannot identify connected PCs. **+ Action** adds rows; select a row and
    use **Action options** to move or remove it. Cycle/previous shortcut fields
    are also shown here. Native shortcut changes from Plasma update the read-only
    shortcut display without discarding drafts.
@@ -92,8 +93,9 @@ The monitor library is available from **Advanced → Manage saved monitors**. Ed
 there or beside an assigned monitor to update its shared mapping. Inputs used
 by any action cannot be deleted until those actions are remapped. Removing a
 monitor from one profile keeps the library definition; only unused definitions
-can be deleted. At least one profile, monitor per profile and enabled action
-must remain. Configuration limits are 16 saved monitors, 32 profiles and 64
+can be deleted. At least one profile, monitor per profile and action must remain.
+Profiles with no enabled actions can be saved for later review; switching is
+unavailable until an action has a complete mapping and is enabled. Configuration limits are 16 saved monitors, 32 profiles and 64
 actions/inputs per profile/monitor.
 
 Appearance (Follow system/Light/Dark), notifications, startup and debounce remain
@@ -109,16 +111,40 @@ source. **LG alternate (0xF4)** retains the existing configurable source address
 normally 0x50. Migrated setups keep the LG method; new monitor definitions default
 to Standard. Groups can freely mix the two methods.
 
-Standard presets include DisplayPort 1/2 (0x0f/0x10) and HDMI 1/2 (0x11/0x12).
-**Load method presets** is an explicit replacement; matching input names keep
-IDs, and unmatched profile mappings must be selected again before saving. Method
-selection alone never silently translates custom codes. On Linux, **Read
-advertised inputs** performs bounded read-only queries of the selected monitor
-and appends advertised values for the chosen method without removing existing
-inputs. On Windows, review the built-in diagnostics and enter the appropriate
-values manually: native diagnostic identifiers are not assumed to match AMD
-indices. USB-C/vendor-specific inputs require the monitor's own advertised or
-known-working values; no universal USB-C code is guessed.
+Input lists are read automatically on startup/Refresh, when connecting a monitor,
+and when adding a new one. Each monitor is queried separately. New definitions
+and old generic preset lists opt into automatic setup; customized legacy mappings
+remain manual. The Add Monitor dialog has a 640×340 default and 540×300 minimum
+so the description and selectors fit.
+
+A usable advertised list replaces the generic choices for that monitor. Existing
+input/action IDs, shortcuts and custom names are retained when their codes still
+match. Single-monitor profiles gain actions for newly discovered inputs. Actions
+whose inputs disappear are kept disabled with their name/ID/shortcut intact for
+review. Unknown vendor values keep their numeric labels. Dell’s advertised 0x1b
+is labeled USB-C only for Dell, not treated as a universal port code.
+
+LG monitors often omit the alternate F4 value list. If they advertise standard
+ports, the app can filter the monitor’s existing LG mapping for the documented
+DP/HDMI equivalents; it retains that mapping’s labels/codes instead of guessing
+a universal USB-C alternate code. If any advertised value cannot be mapped, or
+the reply is missing/empty/invalid, the existing mapping remains intact with a
+status explaining that automatic setup was unavailable. No write probes or
+fallback switching commands are used. Relevant protocol notes are in the
+[ddcutil LG wiki](https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors).
+
+Changes are drafts until **Save settings**. In **Edit monitor & inputs**, uncheck
+**Read and set up this monitor’s inputs automatically** for a custom mapping.
+Read advertised inputs can refresh an automatic list or append to a manual list;
+method presets remain an explicit manual option.
+
+Linux uses a bounded capability query on the resolved bus/display. Windows uses
+an isolated timed child process: ADL’s selected monitor EDID must match exactly
+one active Windows monitor with one physical handle, using the documented
+[EnumDisplayDevices/SetupAPI link](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaydevicesw).
+Unmatched, duplicate, cloned or ambiguous native targets keep the existing
+mapping. Native diagnostic indices are never assumed to be AMD indices. SetupAPI
+is part of Windows; no additional third-party runtime library is introduced.
 
 Standard switching uses the existing platform transports: ddcutil on Linux and
 AMD ADL on Windows. It does not add Intel/NVIDIA Windows GPU backends. DDC/CI must
@@ -143,7 +169,12 @@ files when moving the app. Additional legacy targets remain intact in the origin
 config.json. The legacy frontend does not understand profiles; avoid running both
 frontends together because startup/key ownership still overlaps.
 
-On Linux, the workspace is the versioned `profilesV2` entry in the existing
+The current workspace schema is version 3 and imports version 2, adding an
+explicit automatic-input preference and disabled actions with missing mappings.
+Older builds reject the newer schema rather than overwriting it; restore the
+settings backup when rolling back.
+
+On Linux, the workspace remains in the versioned `profilesV2` entry in the existing
 per-user Qt settings file, normally
 `~/.config/LGInputSwitch/LGInputSwitchDesktop.conf`. The standalone CLI does not
 read these profiles. Plasma Autostart changes are respected at next launch.
@@ -330,3 +361,10 @@ editing modes, across all global pages, including visible failed-monitor results
 They verify scrolling and separation of content, status and footer controls.
 Reconnect regressions ensure another saved monitor’s connection is not offered.
 Theme previews include compact editing and the normal switching view.
+
+Automatic-input regressions use different synthetic Dell/LG capability lists.
+They cover phantom-port removal, per-monitor USB-C naming, retained IDs/shortcuts,
+retired actions, repeated reads, missing/empty/oversized lists, custom opt-out and
+the real Add Monitor → asynchronous read → configured-input path. Read-only checks
+on the maintainer’s connected Dell and LG confirmed different advertised lists;
+no input-switch command was sent during those checks.

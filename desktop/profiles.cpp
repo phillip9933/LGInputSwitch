@@ -1,5 +1,6 @@
 #include "profiles.h"
 #include "../core/input_value.h"
+#include "monitor_inputs.h"
 #include <QKeySequence>
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
@@ -158,6 +159,7 @@ DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy)
         input.shortcut.clear();
         input.enabled = true;
     }
+    m.autoInputs = IsPresetInputList(m);
     w.monitors = {m};
     w.profiles = {p};
     w.activeProfile = p.id;
@@ -173,6 +175,7 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                     {"route", RouteJson(m.route)},
                                     {"source", m.source},
                                     {"method", m.method},
+                                    {"autoInputs", m.autoInputs},
                                     {"inputs", InputJson(m.inputs)}});
     for (const auto &p : w.profiles)
     {
@@ -198,7 +201,7 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                     {"previousShortcut", p.previousShortcut}});
     }
     const auto &c = w.preferences;
-    return {{"version", 2},
+    return {{"version", 3},
             {"activeProfile", w.activeProfile},
             {"monitors", monitors},
             {"profiles", profiles},
@@ -297,7 +300,6 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
         if (!shortcut(p.cycleShortcut) || !shortcut(p.previousShortcut))
             return fail("Shortcuts must be valid and unique across every profile.");
         QSet<QString> ids, labels;
-        bool enabled = false;
         for (const auto &a : p.actions)
         {
             if (!validId(a.id) || a.id == "cycle" || a.id == "previous" || ids.contains(a.id) ||
@@ -305,8 +307,6 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
                 return fail(p.name + ": actions need unique names and IDs.");
             ids.insert(a.id);
             labels.insert(a.name);
-            if (a.enabled)
-                enabled = true;
             if (a.enabled && !shortcut(a.shortcut))
                 return fail("Shortcuts must be valid and unique across every profile.");
             if (a.inputs.size() != members.size())
@@ -314,19 +314,18 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             for (auto it = a.inputs.begin(); it != a.inputs.end(); ++it)
             {
                 const auto *m = FindMonitor(w, it.key());
-                if (!members.contains(it.key()) || !m || !FindMonitorInput(*m, it.value()))
+                if (!members.contains(it.key()) || !m ||
+                    (!FindMonitorInput(*m, it.value()) && (a.enabled || !it.value().isEmpty())))
                     return fail(p.name + ": select an existing input for each monitor.");
             }
         }
-        if (!enabled)
-            return fail(p.name + ": enable at least one action.");
     }
     return true;
 }
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &error)
 {
     error.clear();
-    if (json["version"].toInt(-1) != 2)
+    if (json["version"].toInt(-1) != 2 && json["version"].toInt(-1) != 3)
     {
         error = "Unsupported profile configuration version.";
         return false;
@@ -355,6 +354,7 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
             const auto i = input.toObject();
             m.inputs.push_back({i["label"].toString(), i["code"].toString(), {}, true, i["id"].toString()});
         }
+        m.autoInputs = j.contains("autoInputs") ? j["autoInputs"].toBool() : IsPresetInputList(m);
         w.monitors.push_back(m);
     }
     for (auto item : json["profiles"].toArray())

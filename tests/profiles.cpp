@@ -1,4 +1,6 @@
 #include "../desktop/profiles.h"
+#include "../desktop/diagnostics.h"
+#include "../desktop/monitor_inputs.h"
 #include <QApplication>
 #include <iostream>
 
@@ -44,6 +46,77 @@ static DesktopWorkspace fixture()
     w.profiles.push_back(side);
     return w;
 }
+static void automaticInputs()
+{
+    auto caps = [](const QByteArray &text) {
+        auto value = ParseDiagnosticCapabilities(text);
+        value["read"] = true;
+        return value;
+    };
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &dell = w.monitors[0];
+    dell.name = "DELL S2722QC";
+    dell.route.label = dell.name;
+    dell.method = "standard";
+    dell.inputs = DefaultMonitorInputs("standard");
+    auto &profile = w.profiles[0];
+    profile.actions.clear();
+    for (const auto &input : dell.inputs)
+        profile.actions.push_back({NewDesktopId(), input.label, {}, true, {{dell.id, input.id}}});
+    profile.actions[2].shortcut = "CTRL+ALT+9";
+    const auto hdmiId = dell.inputs[2].id, actionId = profile.actions[2].id;
+    const auto read = InputsFromCapabilities(dell, caps("(vcp(60(1B 11 12)))"));
+    check(read.complete && read.inputs.size() == 3 && read.inputs[2].label == "USB-C",
+          "Dell advertised USB-C/HDMI inputs were not recognized");
+    check(ApplyMonitorInputs(w, dell.id, read), "Auto setup did not replace the generic input list");
+    check(w.monitors[0].inputs.size() == 3 && w.monitors[0].inputs[0].id == hdmiId,
+          "Existing HDMI input ID was discarded");
+    check(w.profiles[0].actions[2].id == actionId && w.profiles[0].actions[2].shortcut == "CTRL+ALT+9",
+          "Existing action/shortcut was lost");
+    check(!w.profiles[0].actions[0].enabled && w.profiles[0].actions[0].inputs.value(dell.id).isEmpty(),
+          "Missing DisplayPort action was left active");
+    QString error;
+    check(ValidateWorkspace(w, error), "Retired actions cannot be saved for later review");
+    const auto persisted = WorkspaceJson(w);
+    DesktopWorkspace roundtrip;
+    check(ParseWorkspace(persisted, roundtrip, error) && roundtrip.monitors[0].autoInputs,
+          "Automatic-input preference did not roundtrip");
+    check(!ApplyMonitorInputs(w, dell.id, read) && WorkspaceJson(w) == persisted,
+          "Repeated reads recreate IDs/actions or dirty unchanged settings");
+    auto unavailable = InputsFromCapabilities(w.monitors[0], QJsonObject{{"read", false}});
+    check(!ApplyMonitorInputs(w, dell.id, unavailable) && WorkspaceJson(w) == persisted,
+          "Failed capability read damaged existing mappings");
+    auto empty = InputsFromCapabilities(w.monitors[0], caps("(vcp(60()))"));
+    check(!empty.complete && !ApplyMonitorInputs(w, dell.id, empty),
+          "Empty list erased known input mappings");
+    w.monitors[0].autoInputs = false;
+    check(!ApplyMonitorInputs(w, dell.id, read), "Automatic reads overwrote a manual mapping");
+    auto generic = w.monitors[0];
+    generic.name = generic.route.label = "Other brand";
+    generic.inputs = DefaultMonitorInputs("standard");
+    check(InputsFromCapabilities(generic, caps("(vcp(60(1b)))")).inputs[0].label != "USB-C",
+          "Dell USB-C code was treated as universal");
+    auto lg = MigrateDesktopConfig(DesktopConfig{});
+    const auto lgRead = InputsFromCapabilities(lg.monitors[0], caps("(vcp(60(11 12 0F 10) F4))"));
+    check(lgRead.complete && lgRead.inputs.size() == 4 && lgRead.inputs[1].label == "USB-C" &&
+              lgRead.inputs[1].code == "0xd1",
+          "LG standard port list did not retain configured alternate mapping");
+    check(!InputsFromCapabilities(lg.monitors[0], caps("(vcp(60(0F 1B)))")).complete,
+          "Unmapped LG input received a guessed alternate code");
+    check(InputsFromCapabilities(lg.monitors[0], caps("(vcp(F4(90 D0 E0)))"))
+              .inputs[2]
+              .label.startsWith("Input 0x"),
+          "Unknown advertised LG value was assigned a guessed port name");
+    auto custom = DesktopConfig{};
+    custom.inputs[0].code = "0x1234";
+    check(!MigrateDesktopConfig(custom).monitors[0].autoInputs,
+          "Custom legacy mapping was opted into destructive automatic replacement");
+    QByteArray tooMany("(vcp(60(");
+    for (int i = 0; i < 65; ++i)
+        tooMany += QByteArray::number(i, 16) + ' ';
+    tooMany += ")))";
+    check(!InputsFromCapabilities(generic, caps(tooMany)).complete, "Oversized input list was applied");
+}
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -52,6 +125,7 @@ int main(int argc, char **argv)
     QTemporaryDir temp;
     check(temp.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temp.path());
+    automaticInputs();
     DesktopConfig legacy;
     legacy.adapter = 4;
     legacy.display = 5;
