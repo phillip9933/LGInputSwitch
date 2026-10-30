@@ -1,11 +1,21 @@
 #pragma once
 #include "platform.h"
 
+struct DiagnosticMonitorSnapshot
+{
+    DesktopConfig config;
+    bool selected = false;
+    int monitorIndex = -1;
+};
+
 struct DiagnosticSnapshot
 {
     DesktopConfig config;
     bool selected = false, unsaved = false;
     QJsonObject lastCommand;
+    QVector<DiagnosticMonitorSnapshot> monitors;
+    int profileCount = 1;
+    QJsonArray actions;
 };
 
 // Only explicitly selected, bounded numeric controls are included in the report.

@@ -1,6 +1,6 @@
-# LG Input Switch 1.2.0 — Windows x64
+# LG Input Switch 1.3.0 — Windows x64
 
-Download `LGInputSwitch-1.2.0-Windows-x64.zip` from the numeric `1.2.0` release.
+Download `LGInputSwitch-1.3.0-Windows-x64.zip` from the numeric `1.3.0` release.
 Extract the complete ZIP to a writable folder in your user profile. Keep the
 folders, DLLs and notices beside `LGInputSwitchDesktop.exe`; start that executable.
 Windows currently requires an AMD GPU/driver. Intel/NVIDIA backends and macOS
@@ -13,9 +13,10 @@ license terms; Microsoft files are not relicensed by the application's AGPL.
 Existing newer VC++ runtimes can be retained. No runtime installer is executed
 silently by this application.
 
-Choose your monitor explicitly, review enabled inputs/codes and save. Input
-switching uses LG's F4/source-50 profile. Codes differ across monitor models; do
-not guess or scan codes. Settings include direct, cycle and previous-input
+Choose each monitor explicitly, review its detected inputs and save. Use LG's
+alternate F4 method for known LG mappings or standard DDC/CI Input Source (0x60)
+for compatible monitors such as Dell. Codes differ across monitor models; do not
+guess or scan codes. Settings include direct, cycle and previous-input
 shortcuts, notifications, system/light/dark appearance and start-on-sign-in.
 Previous input remembers accepted selections in this session, not the initial
 physical input. A success notification means the command was sent without readback.
@@ -27,20 +28,41 @@ and nothing is uploaded automatically. See [diagnostic details](desktop-ui.md#bu
 
 ## Upgrade and legacy frontend
 
-Quit any older LGInputSwitch before upgrading. Back up its config.json, then copy
-that file next to the new executable before starting it. The modern frontend
+Quit any older LGInputSwitch before upgrading. Back up config.json and
+desktop-profiles.json (if present), then copy them next to the new executable
+before starting it. The modern frontend
 reads the legacy first target, custom mappings, enabled order and shortcuts;
 additional configured targets are retained when saving. Its appearance and
 previous/disabled-row preferences are stored per-user by Qt. Restore your backed-up
 config and old executable to roll back. Do not extract over a running executable.
 
-`LGInputSwitch-1.2.0-Windows-legacy-x64.zip` contains the original Win32 frontend
+`LGInputSwitch-1.3.0-Windows-legacy-x64.zip` contains the original Win32 frontend
 with maintenance fixes, for users who prefer it. Run only one frontend at a time:
 they share config.json conventions, the Windows startup entry and global keys.
 Both folders must remain writable for config.json. Windows Startup Apps may
 independently disable an enabled startup entry. Disable startup in the app before
 removing its folder; uninstalling is otherwise just quitting and removing the
 extracted folder. Keep your backed-up configuration if you want to retain it.
+
+## Monitor profiles
+
+Version 1.3.0 adds profiles to the modern frontend. Existing 1.2 config.json
+and per-user preferences are imported into one Main monitor profile. Confirm the
+connection and save. The new workspace is stored atomically in
+**desktop-profiles.json beside LGInputSwitchDesktop.exe**; keep this file when
+moving/upgrading the modern app. The original config.json is preserved for legacy
+rollback. The legacy frontend does not support profiles or grouped commands. Per-monitor
+method selection also adds standard DDC/CI input-source commands (0x60), including
+for compatible Dell models, through the existing AMD backend. This does not remove
+the Windows AMD requirement. Automatic input setup uses a timed, read-only native
+query only when the selected AMD monitor can be uniquely matched by EDID; otherwise
+it keeps the previous mapping. See the desktop UI documentation for custom overrides.
+
+Use + Profile for an independent set of actions, + Monitor to assign displays,
+and each monitor's Edit menu to maintain its shared input-code mapping. One action
+can select a different input on each monitor. Shortcuts and tray entries name the
+profile; partial failures have per-monitor results and a failed-only retry.
+See [profile setup](desktop-ui.md#monitor-profiles).
 
 ## Licenses, corresponding source and replacement libraries
 
@@ -63,7 +85,7 @@ Windows bundle omits the optional Mesa software-OpenGL DLL and Microsoft shader
 compiler; this app uses raster Widgets and does not require Qt Quick/OpenGL.
 
 Corresponding application source and build/packaging scripts are attached as
-`LGInputSwitch-1.2.0-source.tar.gz`. SOURCE_REVISION identifies the exact tested
+`LGInputSwitch-1.3.0-source.tar.gz`. SOURCE_REVISION identifies the exact tested
 Git commit. BUILD-INFO.json records the Qt source hashes and runtime-installer hash;
 MANIFEST.json hashes the extracted bundle files. The release-level SHA256SUMS
 covers all downloadable application/dependency source and package assets.

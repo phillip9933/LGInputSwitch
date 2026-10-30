@@ -74,3 +74,15 @@ EXPORT int ADL_Display_DDCBlockAccess_Get(int adapter, int display, int option, 
     return writeStatus;
 }
 #endif
+
+EXPORT int ADL_Display_EdidData_Get(int adapter, int display, ADLDisplayEDIDData *data)
+{
+    if (adapter != 7 || display != 3 || !data || data->iSize != sizeof(*data))
+        return -2;
+    std::memset(data->cEDIDData, 0, sizeof(data->cEDIDData));
+    const unsigned char header[] = {0, 255, 255, 255, 255, 255, 255, 0};
+    std::memcpy(data->cEDIDData, header, sizeof(header));
+    data->cEDIDData[127] = 6; // base-block checksum
+    data->iEDIDSize = 128;
+    return 0;
+}

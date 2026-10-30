@@ -8,7 +8,7 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-The [1.2.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.2.0) contains a native `.pkg.tar.zst` package, its corresponding
+The [1.3.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.0) contains a native `.pkg.tar.zst` package, its corresponding
 source archive, PKGBUILD, source revision and SHA256SUMS. Download the package, source and SHA256SUMS from the release. CI also provides the
 `LGInputSwitch-CachyOS-Arch` artifact. This is
 not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
@@ -49,6 +49,24 @@ host keeps the window hidden; without a tray host it opens the window. Uncheckin
 startup disables that entry. The GUI preference reflects the actual entry, so
 changes from Plasma Autostart are respected on next launch. Moving a development
 executable requires saving startup again to update its absolute path.
+
+## Monitor profiles
+
+Version 1.3.0 adds named profile tabs. The first run imports the existing
+single-monitor settings without modifying them; confirm the connection and save.
+The new workspace is stored in the `profilesV2` entry of the same Qt settings file
+(normally `~/.config/LGInputSwitch/LGInputSwitchDesktop.conf`). Back up that file
+before upgrading; legacy preference keys remain available for
+rollback, but edits to profiles do not update the older editor's settings.
+
+Use + Profile and + Monitor to configure groups. New monitors can use Standard
+DDC/CI (0x60), including compatible Dell models, or the LG alternate method.
+The app reads each monitor’s advertised inputs during setup/startup/Refresh.
+Detected changes require Save settings once; custom mappings can opt out in the
+monitor editor. Missing/unusable lists retain existing values. Select every member's input
+in each action row. KDE's shortcut manager lists the actions under their profile
+names, and existing migrated shortcut IDs are retained. See
+[profile setup and retry behavior](desktop-ui.md#monitor-profiles).
 
 ## Build a package from source
 

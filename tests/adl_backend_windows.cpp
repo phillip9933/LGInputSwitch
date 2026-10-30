@@ -41,15 +41,24 @@ int wmain(int argc, wchar_t **argv)
           "Display enumeration failed");
     ReleaseAdlMemory(reinterpret_cast<void **>(&display));
     Check(!display, "Driver allocation was not released");
+    ADLDisplayEDIDData edid{};
+    edid.iSize = sizeof(edid);
+    Check(Adl().edid && Adl().edid(7, 3, &edid) == 0 && edid.iEDIDSize == 128 &&
+              static_cast<unsigned char>(edid.cEDIDData[1]) == 255,
+          "Optional monitor identity read failed");
     lg::InputCommand input{0x50, 0xf4, 0xd0};
     Check(SendAdlCommand(7, 3, input) == 0 && count(2) == 1, "Fake driver write failed");
     const std::array<unsigned char, 8> expected{0x6e, 0x50, 0x84, 0x03, 0xf4, 0, 0xd0, 0x9d};
     Check(std::equal(expected.begin(), expected.end(), packet()) && target(0) == 7 && target(1) == 3,
           "Wrong wire packet or selected target");
+    Check(SendAdlCommand(7, 3, {0x51, 0x60, 0x11}) == 0 && count(2) == 2,
+          "Standard input-source command did not reach the AMD transport");
+    const std::array<unsigned char, 8> standard{0x6e, 0x51, 0x84, 0x03, 0x60, 0, 0x11, 0xc9};
+    Check(std::equal(standard.begin(), standard.end(), packet()), "Wrong standard DDC/CI wire packet");
     status(0, -3);
     Check(SendAdlCommand(7, 3, input) == -3, "Driver error was lost");
     input.sourceAddress = 0x150;
-    Check(SendAdlCommand(7, 3, input) == ADL_ERR_INVALID_PARAM && count(2) == 2,
+    Check(SendAdlCommand(7, 3, input) == ADL_ERR_INVALID_PARAM && count(2) == 3,
           "Invalid command reached driver");
     ShutdownAdl();
     ShutdownAdl();

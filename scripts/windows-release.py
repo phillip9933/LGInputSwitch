@@ -11,7 +11,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 QT = json.loads((ROOT / 'packaging/windows/qt-sources.json').read_text())
 
 
@@ -25,7 +25,7 @@ def dependencies(output):
         path = output / entry['name']
         if not path.exists():
             url = 'https://download.qt.io/archive/qt/6.8/6.8.3/submodules/' + entry['name']
-            request = urllib.request.Request(url, headers={'User-Agent': 'LGInputSwitch-release/1.2.0'})
+            request = urllib.request.Request(url, headers={'User-Agent': 'LGInputSwitch-release/1.3.0'})
             with urllib.request.urlopen(request, timeout=180) as source, path.open('wb') as target:
                 shutil.copyfileobj(source, target)
         if digest(path) != entry['sha256']:

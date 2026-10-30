@@ -1,8 +1,10 @@
 #include "platform.h"
+#include "../core/input_value.h"
 #include "process.h"
+#include "profiles.h"
 #ifdef Q_OS_WIN
-#include "../platform/windows/adl_session.h"
 #include "../app/app_config.h"
+#include "../platform/windows/adl_session.h"
 #include "../platform/windows/adl_transport.h"
 #else
 #include "../platform/linux/ddcutil_backend.h"
@@ -165,8 +167,7 @@ Discovery DiscoverDesktopMonitors()
     std::vector<AdapterInfo> adapters(count);
     for (auto &adapter : adapters)
         adapter.iSize = sizeof(AdapterInfo);
-    if (Adl().adapters(adapters.data(), int(adapters.size() * sizeof(AdapterInfo))) !=
-        ADL_OK)
+    if (Adl().adapters(adapters.data(), int(adapters.size() * sizeof(AdapterInfo))) != ADL_OK)
     {
         result.message = "Could not enumerate AMD adapters.";
         return result;
@@ -185,10 +186,19 @@ Discovery DiscoverDesktopMonitors()
                     info[j].displayID.iDisplayLogicalAdapterIndex != adapter.iAdapterIndex)
                     continue;
                 const int display = info[j].displayID.iDisplayLogicalIndex;
+                QString identity;
+                if (Adl().edid)
+                {
+                    ADLDisplayEDIDData data{};
+                    data.iSize = sizeof(data);
+                    if (Adl().edid(adapter.iAdapterIndex, display, &data) == ADL_OK &&
+                        data.iEDIDSize >= 128 && data.iEDIDSize <= ADL_MAX_EDIDDATA_SIZE)
+                        identity = MonitorIdentity(QByteArray(data.cEDIDData, data.iEDIDSize));
+                }
                 result.monitors.push_back(
                     {QString::fromLocal8Bit(info[j].strDisplayName) +
                          QString(" · Adapter %1 / Display %2").arg(adapter.iAdapterIndex).arg(display),
-                     adapter.iAdapterIndex, display, false});
+                     adapter.iAdapterIndex, display, false, identity});
             }
         if (info)
             ReleaseAdlMemory(reinterpret_cast<void **>(&info));
@@ -206,40 +216,26 @@ Discovery DiscoverDesktopMonitors()
         return result;
     }
     const QString output = QString::fromLocal8Bit(probe.output);
-    DesktopMonitor current;
-    auto append = [&] {
-        if (current.display >= 0)
-            result.monitors.push_back(current);
-        current = {};
-    };
-    for (const auto &line : output.split('\n'))
-    {
-        auto display = QRegularExpression("^Display\\s+(\\d+)").match(line);
-        if (display.hasMatch())
-        {
-            append();
-            current.display = display.captured(1).toInt();
-            current.label = "Display " + display.captured(1);
-        }
-        auto bus = QRegularExpression("I2C bus:\\s+/dev/i2c-(\\d+)").match(line);
-        if (bus.hasMatch() && current.display >= 0)
-        {
-            current.display = bus.captured(1).toInt();
-            current.bus = true;
-        }
-        auto model = QRegularExpression("Model:\\s+(.+)").match(line);
-        if (model.hasMatch() && current.display >= 0)
-            current.label = model.captured(1).trimmed();
-        // ddcutil 3 brief output uses manufacturer:model:serial instead of a
-        // separate Model field. Show the model, without the serial number.
-        auto monitor = QRegularExpression("Monitor:\\s+([^:]+):([^:]+)").match(line);
-        if (monitor.hasMatch() && current.display >= 0)
-            current.label = monitor.captured(2).trimmed();
-    }
-    append();
+    result.monitors = ParseDesktopDiscovery(probe.output).monitors;
+    // Prefer the base EDID fingerprint when the kernel exposes a connector's
+    // DDC bus. This also works with older ddcutil brief output without serials.
+    const QDir drm("/sys/class/drm");
     for (auto &monitor : result.monitors)
-        monitor.label += monitor.bus ? QString(" · I²C %1").arg(monitor.display)
-                                     : QString(" · Display %1").arg(monitor.display);
+        if (monitor.bus)
+            for (const auto &connector : drm.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            {
+                const auto path = drm.filePath(connector);
+                if (QFileInfo(path + "/ddc").canonicalFilePath().section('/', -1) !=
+                    QString("i2c-%1").arg(monitor.display))
+                    continue;
+                QFile edid(path + "/edid");
+                if (edid.open(QIODevice::ReadOnly))
+                {
+                    const auto identity = MonitorIdentity(edid.read(128));
+                    if (!identity.isEmpty())
+                        monitor.identity = identity;
+                }
+            }
     if (probe.status != "finished" || probe.exitCode != 0)
     {
         result.monitors.clear();
@@ -250,19 +246,39 @@ Discovery DiscoverDesktopMonitors()
         result.message =
             result.monitors.isEmpty()
                 ? "No controllable monitors found. Check the cable, graphics driver and DDC/I2C access."
-                : QString("%1 monitor(s) available. Select the display you want to control.")
+                : QString("%1 monitor(s) available. Use Connect on a saved monitor if needed.")
                       .arg(result.monitors.size());
     return result;
 }
 
 lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
 {
+    if (c.method != "lg" && c.method != "standard")
+        return {lg::SwitchStatus::InvalidArgument, 2, "Choose a supported input switching method."};
+    unsigned int source = 0x51, value;
+    if ((c.method == "lg" && !ParseInputValue(c.source.toStdString(), 0xff, source)) ||
+        !ParseInputValue(code.toStdString(), 0xffff, value) || c.display < 0)
+        return {lg::SwitchStatus::InvalidArgument, 2, "Invalid monitor or input code."};
+    const lg::InputCommand command{source, c.method == "standard" ? 0x60u : 0xf4u, value};
 #ifdef Q_OS_WIN
     AdlTransport transport(c.adapter, c.display);
+    return transport.Send(command);
 #else
     DdcutilTransport transport(c.bus ? "--bus" : "--display", static_cast<unsigned int>(c.display));
+    const auto arguments = transport.Arguments(command);
+    if (arguments.empty())
+        return {lg::SwitchStatus::InvalidArgument, 2, "Invalid monitor or input command."};
+    QStringList args;
+    for (std::size_t i = 1; i < arguments.size(); ++i)
+        args.push_back(QString::fromStdString(arguments[i]));
+    const auto result = RunDesktopProcess("ddcutil", args, 10000);
+    if (result.status == "finished" && result.exitCode == 0)
+        return {lg::SwitchStatus::CommandSent, 0, "Command sent; physical switch unverified."};
+    return {
+        lg::SwitchStatus::TransportFailure, result.exitCode,
+        (QString("ddcutil %1 (code %2). Check cable and I2C access.").arg(result.status).arg(result.exitCode))
+            .toStdString()};
 #endif
-    return lg::SwitchInput(transport, c.source.toStdString(), code.toStdString());
 }
 
 bool SaveDesktopShortcutPreferences(const DesktopConfig &c, QString &error)

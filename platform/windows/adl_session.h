@@ -10,6 +10,7 @@ struct AdlFunctions
     int (*adapterCount)(int *) = nullptr;
     int (*adapters)(LPAdapterInfo, int) = nullptr;
     int (*displays)(int, int *, ADLDisplayInfo **, int) = nullptr;
+    int (*edid)(int, int, ADLDisplayEDIDData *) = nullptr; // optional identity read
     int (*writeBlock)(int, int, int, int, int, char *, int *, char *) = nullptr;
 };
 bool InitializeAdl();

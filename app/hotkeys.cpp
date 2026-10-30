@@ -8,7 +8,7 @@ static UINT ModFromToken(const std::string& t) {
     if (t == "CTRL") return MOD_CONTROL;
     if (t == "ALT")  return MOD_ALT;
     if (t == "SHIFT")return MOD_SHIFT;
-    if (t == "WIN")  return MOD_WIN;
+    if (t == "WIN" || t == "META")  return MOD_WIN;
     return 0;
 }
 static UINT VkFromToken(const std::string& t) {

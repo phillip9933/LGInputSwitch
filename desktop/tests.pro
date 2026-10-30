@@ -8,3 +8,7 @@ unix:!macx:exists(/usr/include/KF6/KGlobalAccel/KGlobalAccel) {
     INCLUDEPATH += /usr/include/KF6/KGlobalAccel
     LIBS += -lKF6GlobalAccel
 }
+
+SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp
+
+SOURCES += monitor_inputs.cpp
