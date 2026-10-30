@@ -13,11 +13,11 @@ accent, clearer hierarchy, rounded cards and comfortable input rows work in both
 light and dark modes. The monitor glyph is drawn at multiple resolutions, so tray
 and window icons scale without raster stretching.
 
-## Monitor profiles (development checkout)
+## Monitor profiles
 
-This section describes the current development checkout. The published 1.2.0
-release has the earlier single-monitor editor; the legacy Win32 frontend and
-standalone Linux CLI retain their existing single-target behavior.
+Version 1.3.0 includes monitor profiles in the modern Windows/Linux frontend.
+The legacy Win32 frontend and standalone Linux CLI retain their existing
+single-target behavior.
 
 The top navigation contains **Profiles**, **Preferences**, **Advanced** and
 **Diagnostics**. App-wide settings are separate pages; monitor controls appear

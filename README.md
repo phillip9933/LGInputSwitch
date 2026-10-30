@@ -15,9 +15,9 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 > **Windows requires AMD:** Windows uses AMD ADL. The Linux version uses ddcutil; GPU and monitor support must be verified for each setup.
 > **⚠ I²C WARNING:** DDC/CI commands are sent directly to your monitor. Use at your own risk. Malformed commands can cause misbehavior on some displays.
 
-## Monitor profiles (development checkout)
+## Monitor profiles
 
-The next update adds named monitor tabs to the modern Windows/Linux app. Each
+Version 1.3.0 adds named monitor tabs to the modern Windows/Linux app. Each
 profile can switch one or several saved monitors with a single action, with a
 separate input choice for each monitor. Cycle/previous shortcuts, per-monitor
 results, failed-monitor retries and profile submenus in the tray are included.
@@ -27,9 +27,7 @@ compatible monitors, alongside the existing LG alternate method. Mixed groups ar
 supported; Windows switching still requires AMD. Each monitor can read and set up
 its own advertised inputs automatically, with custom overrides and safe fallback
 when it does not report a usable list.
-The published **1.2.0** release still has the single-monitor editor. See
-[profile setup and migration](docs/desktop-ui.md#monitor-profiles-development-checkout)
-for the development version.
+See [profile setup and migration](docs/desktop-ui.md#monitor-profiles).
 
 ## Features
 - Tray menu entries for the inputs you enable
@@ -41,7 +39,7 @@ for the development version.
 
 ## Download / Run (Windows)
 
-Download [version 1.2.0](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.2.0).
+Download [version 1.3.0](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.0).
 Use the Windows x64 ZIP for the modern app or the legacy ZIP for the Win32 frontend.
 See [installation, upgrades and runtime setup](docs/windows-release.md).
 
@@ -126,7 +124,7 @@ COPYRIGHT.md
 - DDC/CI references — ddcutil docs/wiki and other notes (documentation only).
 - **Jason7536/lg-input-switch** — Separate Intel IGCL-based Windows port: https://github.com/Jason7536/lg-input-switch . Intel GPU users can evaluate that project; its compatibility is maintained independently.
 
-Project code is **AGPL-3.0-or-later** for future releases; see [LICENSE.md](LICENSE.md)
+Project code is **AGPL-3.0-or-later**; see [LICENSE.md](LICENSE.md)
 and [copyright and source distribution](COPYRIGHT.md). Earlier MIT releases retain
 their original terms. Dependencies keep their own licenses; see
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
@@ -153,4 +151,4 @@ input shortcuts. [Install the native Arch/CachyOS package](docs/linux-install.md
 or build from source. Windows packages include both the modern and legacy frontends. Physical Windows
 hardware validation remains limited; see the release notes.
 
-See [release notes](docs/releases/1.2.0.md) and [publication workflow](docs/release-candidate.md).
+See [release notes](docs/releases/1.3.0.md) and [publication workflow](docs/release-candidate.md).
