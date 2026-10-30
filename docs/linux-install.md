@@ -50,6 +50,23 @@ startup disables that entry. The GUI preference reflects the actual entry, so
 changes from Plasma Autostart are respected on next launch. Moving a development
 executable requires saving startup again to update its absolute path.
 
+## Development checkout: monitor profiles
+
+The next update adds named profile tabs. The first run imports the existing
+single-monitor settings without modifying them; confirm the connection and save.
+The new workspace is stored in the `profilesV2` entry of the same Qt settings file
+(normally `~/.config/LGInputSwitch/LGInputSwitchDesktop.conf`). Back up that file
+before trying development builds; legacy preference keys remain available for
+rollback, but edits to profiles do not update the older editor's settings.
+
+Use + Profile and + Monitor to configure groups. New monitors can use Standard
+DDC/CI (0x60), including compatible Dell models, or the LG alternate method.
+The monitor editor can append advertised inputs with a read-only query. Select every member's input
+in each action row. KDE's shortcut manager lists the actions under their profile
+names, and existing migrated shortcut IDs are retained. See
+[profile setup and retry behavior](desktop-ui.md#monitor-profiles-development-checkout).
+The published 1.2.0 package still uses the single-monitor editor.
+
 ## Build a package from source
 
 Install build requirements with the distribution package manager: `base-devel`,

@@ -41,6 +41,7 @@ int main() {
     HotkeySpec spec{};
     Check(ParseHotkey(" ctrl + alt + f12 ", spec) && spec.fsModifiers == (MOD_CONTROL | MOD_ALT)
         && spec.vk == VK_F1 + 11, "Valid hotkey rejected");
+    Check(ParseHotkey("Meta+Alt+F8", spec) && spec.fsModifiers == (MOD_WIN | MOD_ALT), "Qt Meta modifier was not mapped to the Windows key");
     for (const auto* bad : {"CTRL+", "CTRL++A", "CTRL+A+B", "CTRL+F12junk", "CTRL+F25", "CTRL+UNKNOWN", "A+?"})
         Check(!ParseHotkey(bad, spec) && spec.vk == 0, "Invalid hotkey accepted");
     std::cout << "Regression checks passed\n";

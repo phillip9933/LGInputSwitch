@@ -15,6 +15,20 @@ Note: I have only tested this on an AMD 7900XTX and 45GX950A-B monitor.
 > **Windows requires AMD:** Windows uses AMD ADL. The Linux version uses ddcutil; GPU and monitor support must be verified for each setup.
 > **⚠ I²C WARNING:** DDC/CI commands are sent directly to your monitor. Use at your own risk. Malformed commands can cause misbehavior on some displays.
 
+## Monitor profiles (development checkout)
+
+The next update adds named monitor tabs to the modern Windows/Linux app. Each
+profile can switch one or several saved monitors with a single action, with a
+separate input choice for each monitor. Cycle/previous shortcuts, per-monitor
+results, failed-monitor retries and profile submenus in the tray are included.
+A monitor's switching method, source address and input-code mapping are shared
+across profiles. Standard DDC/CI Input Source (0x60) is available for Dell and other
+compatible monitors, alongside the existing LG alternate method. Mixed groups are
+supported; Windows switching still requires AMD.
+The published **1.2.0** release still has the single-monitor editor. See
+[profile setup and migration](docs/desktop-ui.md#monitor-profiles-development-checkout)
+for the development version.
+
 ## Features
 - Tray menu entries for the inputs you enable
 - **Hotkeys**: cycle through inputs, or jump directly to DP/USB-C/HDMI1/HDMI2

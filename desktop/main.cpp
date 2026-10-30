@@ -1,17 +1,16 @@
-#include "../core/input_history.h"
 #include "../core/input_value.h"
-#include "kde_shortcuts.h"
-#include "platform.h"
 #include "diagnostics.h"
+#include "kde_shortcuts.h"
+#include "profiles.h"
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
 #endif
 #include <QtConcurrent>
 #include <QtWidgets>
+#include <cstring>
+#include <iostream>
 #include <map>
 #include <memory>
-#include <iostream>
-#include <cstring>
 #ifdef Q_OS_WIN
 #include "../app/hotkeys.h"
 #include "../platform/windows/startup.h"
@@ -38,7 +37,6 @@ static QIcon MonitorIcon()
         p.drawLine(QPointF(11, 14), QPointF(21, 14));
         p.drawLine(QPointF(18, 11), QPointF(21, 14));
         p.drawLine(QPointF(18, 17), QPointF(21, 14));
-        p.end();
         icon.addPixmap(image);
     }
     return icon;
@@ -49,177 +47,724 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 #ifdef LG_DESKTOP_TEST
     friend struct DesktopWindowProbe;
 #endif
-    DesktopConfig config_;
+    DesktopWorkspace saved_, draft_;
+    DesktopConfig config_; // app-wide saved preferences (also used by the live KDE probe)
+    ProfileSession session_;
     KdeShortcuts kdeShortcuts_;
     const bool kdeAvailable_ = KdeShortcuts::available();
-    QCheckBox *globalShortcuts_;
-    bool preview_, busy_ = false, dirty_ = false, quitting_ = false;
-    int position_ = -1;
-    lg::InputHistory history_;
-    bool recordingShortcut_ = false;
+    bool preview_, busy_ = false, dirty_ = false, quitting_ = false, populating_ = false,
+                   recordingShortcut_ = false;
+    bool configurationBlocked_ = false, registeringShortcuts_ = false;
+    QString activeId_;
+    Discovery discovery_;
+    QMap<QString, DesktopMonitor> confirmed_;
     QThreadPool worker_;
+    QElapsedTimer lastSend_;
+    QTabBar *profileTabs_;
+    QTabWidget *tabs_;
+    QTableWidget *members_, *table_;
+    QComboBox *appearance_;
+    QCheckBox *notifications_, *startup_, *globalShortcuts_, *codes_;
+    QSpinBox *debounce_;
+    QKeySequenceEdit *cycleShortcut_, *previousShortcut_;
+    QPushButton *refresh_, *save_, *cycle_, *previous_, *retry_, *addMonitor_, *addProfile_, *renameProfile_,
+        *removeProfile_;
+    QWidget *controls_, *monitorCard_;
     QSystemTrayIcon *tray_;
     QMenu *menu_;
-    QComboBox *monitors_, *appearance_;
     QLabel *status_, *subtitle_;
-    QTableWidget *table_;
-    QLineEdit *source_;
-    QSpinBox *debounce_;
-    QCheckBox *notifications_, *startup_;
-    QKeySequenceEdit *cycleShortcut_, *previousShortcut_;
-    QPushButton *refresh_, *save_, *cycle_;
-    QWidget *controls_;
-    QVector<DesktopMonitor> detected_;
-    QElapsedTimer lastSend_;
-    QPlainTextEdit *diagnosticReport_;
+    QPlainTextEdit *results_, *diagnosticReport_;
     QPushButton *diagnosticRun_, *diagnosticCopy_, *diagnosticSave_;
     QJsonObject lastCommand_;
 #ifdef Q_OS_WIN
-    std::map<int, int> hotkeys_;
+    std::map<int, QPair<QString, QString>> hotkeys_;
 #endif
+    MonitorProfile &active()
+    {
+        for (auto &p : draft_.profiles)
+            if (p.id == activeId_)
+                return p;
+        return draft_.profiles.front();
+    }
+    SavedMonitor *monitor(const QString &id)
+    {
+        for (auto &m : draft_.monitors)
+            if (m.id == id)
+                return &m;
+        return nullptr;
+    }
     void showWindow()
     {
         showNormal();
         raise();
         activateWindow();
     }
-    void dirty()
-    {
-        if (!dirty_)
-        {
-            dirty_ = true;
-            save_->setText("Save changes");
-            rebuildMenu();
-        }
-    }
     void message(const QString &text)
     {
         status_->setText(text);
     }
-    void setBusy(bool value)
+    void dirty()
     {
-        busy_ = value;
-        monitors_->setEnabled(!value);
-        controls_->setEnabled(!value);
-        refresh_->setEnabled(!value);
-        save_->setEnabled(!value);
-        cycle_->setEnabled(!value);
-        rebuildMenu();
+        if (populating_)
+            return;
+        dirty_ = true;
+        save_->setText("Save changes");
+        updateActions();
     }
-    DesktopConfig collect() const
+    bool shortcutEditingAvailable() const
     {
-        auto c = config_;
-        c.inputs.clear();
-        for (int i = 0; i < table_->rowCount(); ++i)
+#ifdef Q_OS_WIN
+        return true;
+#else
+        return preview_ || (kdeAvailable_ && globalShortcuts_->isChecked());
+#endif
+    }
+    void captureDraft()
+    {
+        if (populating_)
+            return;
+        auto &p = active();
+        QVector<ProfileAction> actions;
+        for (int row = 0; row < table_->rowCount(); ++row)
         {
-            auto *shortcut = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(i, 3));
-            c.inputs.push_back({table_->item(i, 1)->text().trimmed(), table_->item(i, 2)->text().trimmed(),
-                                shortcut
-                                    ? shortcut->keySequence().toString(QKeySequence::PortableText).toUpper()
-                                    : QString{},
-                                table_->item(i, 0)->checkState() == Qt::Checked});
+            ProfileAction a;
+            a.id = table_->item(row, 0)->data(Qt::UserRole).toString();
+            a.name = table_->item(row, 1)->text().trimmed();
+            a.enabled = table_->item(row, 0)->checkState() == Qt::Checked;
+            for (int i = 0; i < p.monitors.size(); ++i)
+            {
+                auto *combo = qobject_cast<QComboBox *>(table_->cellWidget(row, 2 + i));
+                a.inputs[p.monitors[i]] = combo ? combo->currentData().toString() : QString{};
+            }
+            auto *key = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(row, 2 + p.monitors.size()));
+            a.shortcut = key ? key->keySequence().toString(QKeySequence::PortableText).toUpper() : QString{};
+            actions.push_back(a);
         }
-        c.source = source_->text().trimmed();
-        c.debounce = debounce_->value();
+        p.actions = actions;
+        p.cycleShortcut = cycleShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
+        p.previousShortcut = previousShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
+        auto &c = draft_.preferences;
         c.appearance = appearance_->currentData().toString();
         c.notifications = notifications_->isChecked();
         c.startup = startup_->isChecked();
         c.globalShortcuts = globalShortcuts_->isChecked();
-        c.cycleShortcut = cycleShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
-        c.previousShortcut = previousShortcut_->keySequence().toString(QKeySequence::PortableText).toUpper();
-        int selected = monitors_->currentIndex();
-        if (selected >= 0 && selected < detected_.size())
-        {
-            const auto &m = detected_[selected];
-            c.adapter = m.adapter;
-            c.display = m.display;
-            c.bus = m.bus;
-        }
-        return c;
+        c.debounce = debounce_->value();
+        draft_.activeProfile = activeId_;
     }
-    void populate()
+    void setBusy(bool value)
     {
-        QSignalBlocker block(table_);
-        table_->setRowCount(config_.inputs.size());
-        for (int i = 0; i < config_.inputs.size(); ++i)
+        busy_ = value;
+        controls_->setEnabled(!value);
+        monitorCard_->setEnabled(!value);
+        save_->setEnabled(!value && !configurationBlocked_);
+        updateActions();
+    }
+    void rebuildTabs()
+    {
+        const QSignalBlocker block(profileTabs_);
+        while (profileTabs_->count())
+            profileTabs_->removeTab(0);
+        for (const auto &p : draft_.profiles)
         {
-            const auto &row = config_.inputs[i];
+            const int index = profileTabs_->addTab(p.name);
+            profileTabs_->setTabData(index, p.id);
+            if (p.id == activeId_)
+                profileTabs_->setCurrentIndex(index);
+        }
+    }
+    void selectConnection(const QString &id, int selected)
+    {
+        if (populating_ || selected < 0 || selected >= discovery_.monitors.size())
+            return;
+        captureDraft();
+        auto *m = monitor(id);
+        if (!m)
+            return;
+        const auto target = discovery_.monitors[selected];
+        for (const auto &other : draft_.monitors)
+        {
+            const auto resolved = ResolveSavedMonitor(other, discovery_, confirmed_);
+            if (other.id != id && resolved.available &&
+                MonitorRouteKey(resolved.target) == MonitorRouteKey(target))
+            {
+                message("That monitor is already saved as “" + other.name +
+                        "”. Add the saved monitor to this profile instead.");
+                populateMembers();
+                return;
+            }
+        }
+        m->route = target;
+        int matches = 0;
+        for (const auto &candidate : discovery_.monitors)
+            if (!target.identity.isEmpty() && candidate.identity == target.identity)
+                ++matches;
+        // Duplicate/absent identities are explicitly confirmed for this session.
+        m->identity = matches == 1 ? target.identity : QString{};
+        confirmed_[id] = target;
+        dirty();
+        populateMembers();
+        message("Connection selected. Save settings before switching.");
+    }
+    void populateMembers()
+    {
+        const bool old = populating_;
+        populating_ = true;
+        const QSignalBlocker block(members_);
+        const auto &p = active();
+        members_->setRowCount(p.monitors.size());
+        members_->setFixedHeight(qMin(4, qMax(1, int(p.monitors.size()))) * 48 + 44);
+        for (int row = 0; row < p.monitors.size(); ++row)
+        {
+            const auto id = p.monitors[row];
+            const auto *m = FindMonitor(draft_, id);
+            if (!m)
+                continue;
+            members_->setItem(row, 0, new QTableWidgetItem(m->name));
+            auto *connection = new QComboBox;
+            connection->setObjectName("connection-" + id);
+            connection->setAccessibleName(m->name + " connection");
+            connection->setPlaceholderText("Select connection…");
+            for (const auto &target : discovery_.monitors)
+                connection->addItem(target.label);
+            const auto resolved = ResolveSavedMonitor(*m, discovery_, confirmed_);
+            int selected = -1;
+            if (resolved.available)
+                for (int i = 0; i < discovery_.monitors.size(); ++i)
+                    if (MonitorRouteKey(discovery_.monitors[i]) == MonitorRouteKey(resolved.target))
+                        selected = i;
+            connection->setCurrentIndex(selected);
+            connect(connection, &QComboBox::currentIndexChanged, this,
+                    [this, id](int index) { selectConnection(id, index); });
+            members_->setCellWidget(row, 1, connection);
+            auto *status = new QTableWidgetItem(resolved.available ? "Connected" : resolved.reason);
+            status->setToolTip(status->text());
+            members_->setItem(row, 2, status);
+            auto *button = new QPushButton("Edit…");
+            auto *options = new QMenu(button);
+            connect(options->addAction("Edit monitor & inputs…"), &QAction::triggered, this,
+                    [this, id] { editMonitor(id); });
+            auto *remove = options->addAction("Remove from this profile");
+            remove->setEnabled(p.monitors.size() > 1);
+            connect(remove, &QAction::triggered, this, [this, id] {
+                captureDraft();
+                active().monitors.removeAll(id);
+                for (auto &a : active().actions)
+                    a.inputs.remove(id);
+                dirty();
+                populateProfile();
+            });
+            button->setMenu(options);
+            members_->setCellWidget(row, 3, button);
+            members_->setRowHeight(row, 48);
+        }
+        populating_ = old;
+    }
+    void populateProfile()
+    {
+        populating_ = true;
+        populateMembers();
+        const auto &p = active();
+        const QSignalBlocker block(table_);
+        table_->clear();
+        table_->setColumnCount(4 + p.monitors.size());
+        for (int col = 0; col < table_->columnCount(); ++col)
+            table_->setColumnHidden(col, false);
+        QStringList headings{"Use", "Action"};
+        for (const auto &id : p.monitors)
+        {
+            const auto *m = FindMonitor(draft_, id);
+            headings.push_back(m ? m->name : "Missing monitor");
+        }
+        headings << "Shortcut" << "";
+        table_->setHorizontalHeaderLabels(headings);
+        table_->setRowCount(p.actions.size());
+        table_->setColumnWidth(0, 42);
+        table_->setColumnWidth(1, 150);
+        table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        for (int row = 0; row < p.actions.size(); ++row)
+        {
+            const auto &a = p.actions[row];
             auto *enabled = new QTableWidgetItem;
             enabled->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsSelectable);
-            enabled->setCheckState(row.enabled ? Qt::Checked : Qt::Unchecked);
-            table_->setItem(i, 0, enabled);
-            table_->setItem(i, 1, new QTableWidgetItem(row.label));
-            table_->setItem(i, 2, new QTableWidgetItem(row.code));
-            auto *shortcut =
-                new QKeySequenceEdit(QKeySequence::fromString(row.shortcut, QKeySequence::PortableText));
-            shortcut->setMaximumSequenceLength(1);
-            connect(shortcut, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
-#ifndef Q_OS_WIN
-            shortcut->setEnabled(kdeAvailable_ && globalShortcuts_->isChecked());
-#endif
-            table_->setCellWidget(i, 3, shortcut);
+            enabled->setData(Qt::UserRole, a.id);
+            enabled->setCheckState(a.enabled ? Qt::Checked : Qt::Unchecked);
+            table_->setItem(row, 0, enabled);
+            table_->setItem(row, 1, new QTableWidgetItem(a.name));
+            for (int col = 0; col < p.monitors.size(); ++col)
+            {
+                const auto id = p.monitors[col];
+                auto *combo = new QComboBox;
+                combo->setAccessibleName(a.name + " input for " + headings[2 + col]);
+                combo->setPlaceholderText("Choose input…");
+                if (const auto *m = FindMonitor(draft_, id))
+                    for (const auto &input : m->inputs)
+                        combo->addItem(codes_->isChecked() ? input.label + " (" + input.code + ")"
+                                                           : input.label,
+                                       input.id);
+                combo->setCurrentIndex(combo->findData(a.inputs.value(id)));
+                connect(combo, &QComboBox::currentIndexChanged, this, [this] { dirty(); });
+                table_->setCellWidget(row, 2 + col, combo);
+                table_->setColumnWidth(2 + col, 155);
+            }
+            auto *key =
+                new QKeySequenceEdit(QKeySequence::fromString(a.shortcut, QKeySequence::PortableText));
+            key->setMaximumSequenceLength(1);
+            key->setEnabled(shortcutEditingAvailable());
+            connect(key, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
+            table_->setCellWidget(row, 2 + p.monitors.size(), key);
             auto *send = new QPushButton("Switch");
-            send->setToolTip("Send this input command to the saved monitor");
-            connect(send, &QPushButton::clicked, this, [this, i] { sendInput(i); });
-            auto *cell = new QWidget;
-            auto *cellLayout = new QHBoxLayout(cell);
-            cellLayout->setContentsMargins(6, 5, 6, 5);
-            cellLayout->addWidget(send);
-            table_->setCellWidget(i, 4, cell);
-            table_->setRowHeight(i, 46);
+            connect(send, &QPushButton::clicked, this,
+                    [this, profileId = p.id, actionId = a.id] { sendInput(profileId, actionId); });
+            table_->setCellWidget(row, 3 + p.monitors.size(), send);
+            table_->setRowHeight(row, 46);
         }
-    }
-    bool validate(const DesktopConfig &c, QString &error)
-    {
-        unsigned int value;
-        if (!ParseInputValue(c.source.toStdString(), 0xff, value))
-        {
-            error = "Enter a valid source address, such as 0x50.";
-            return false;
-        }
-        QSet<QString> labels, shortcuts;
-        int enabled = 0;
-        auto validateShortcut = [&](const QString &text) {
-            if (text.isEmpty())
-                return true;
-#ifdef Q_OS_WIN
-            HotkeySpec spec{};
-            if (!ParseHotkey(text.toStdString(), spec))
-                return false;
+        const int shortcutCol = 2 + p.monitors.size();
+        table_->setColumnWidth(shortcutCol, 160);
+        table_->setColumnWidth(shortcutCol + 1, 85);
+#ifndef Q_OS_WIN
+        table_->setColumnHidden(shortcutCol, !kdeAvailable_ && !preview_);
 #endif
-            if (shortcuts.contains(text))
-                return false;
-            shortcuts.insert(text);
-            return true;
+        {
+            const QSignalBlocker b(cycleShortcut_);
+            cycleShortcut_->setKeySequence(
+                QKeySequence::fromString(p.cycleShortcut, QKeySequence::PortableText));
+        }
+        {
+            const QSignalBlocker b(previousShortcut_);
+            previousShortcut_->setKeySequence(
+                QKeySequence::fromString(p.previousShortcut, QKeySequence::PortableText));
+        }
+        cycleShortcut_->setEnabled(shortcutEditingAvailable());
+        previousShortcut_->setEnabled(shortcutEditingAvailable());
+        populating_ = false;
+        showResults();
+        updateActions();
+    }
+    void addProfile()
+    {
+        captureDraft();
+        bool ok = false;
+        const auto name =
+            QInputDialog::getText(this, "Add profile", "Profile name", QLineEdit::Normal, "", &ok).trimmed();
+        if (!ok || name.isEmpty())
+            return;
+        for (const auto &p : draft_.profiles)
+            if (p.name == name)
+            {
+                message("Choose a unique profile name.");
+                return;
+            }
+        MonitorProfile p;
+        p.id = NewDesktopId();
+        p.name = name;
+        // Reuse the first saved monitor, with independent actions and no
+        // duplicate default shortcuts. Membership is explicitly editable.
+        const auto &m = draft_.monitors.front();
+        p.monitors = {m.id};
+        for (const auto &input : m.inputs)
+            p.actions.push_back({NewDesktopId(), input.label, {}, true, {{m.id, input.id}}});
+        draft_.profiles.push_back(p);
+        activeId_ = p.id;
+        rebuildTabs();
+        populateProfile();
+        dirty();
+    }
+    void addMonitor()
+    {
+        captureDraft();
+        QDialog dialog(this);
+        dialog.setWindowTitle("Add monitor to “" + active().name + "”");
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *choice = new QComboBox;
+        for (const auto &m : draft_.monitors)
+            if (!active().monitors.contains(m.id))
+                choice->addItem("Saved: " + m.name, m.id);
+        for (int i = 0; i < discovery_.monitors.size(); ++i)
+        {
+            const auto &target = discovery_.monitors[i];
+            bool known = false;
+            for (const auto &m : draft_.monitors)
+            {
+                const auto resolved = ResolveSavedMonitor(m, discovery_, confirmed_);
+                if (resolved.available && MonitorRouteKey(resolved.target) == MonitorRouteKey(target))
+                    known = true;
+            }
+            if (!known && draft_.monitors.size() < 16)
+                choice->addItem("New: " + target.label, i);
+        }
+        if (choice->count() == 0)
+        {
+            message("No other monitors available. Connect a monitor and click Refresh.");
+            return;
+        }
+        auto *hint = new QLabel("Reuse a saved monitor to share its input mapping across profiles.\nChoose "
+                                "each action’s input for the added monitor before saving.");
+        hint->setWordWrap(true);
+        layout->addWidget(hint);
+        layout->addWidget(choice);
+        auto *method = new QComboBox;
+        method->addItem("Standard DDC/CI input source (0x60)", "standard");
+        method->addItem("LG alternate input switching (0xF4)", "lg");
+        auto methodVisibility = [choice, method] {
+            method->setVisible(choice->currentData().metaType().id() != QMetaType::QString);
         };
-        if (!validateShortcut(c.cycleShortcut) || !validateShortcut(c.previousShortcut))
+        connect(choice, &QComboBox::currentIndexChanged, &dialog, methodVisibility);
+        methodVisibility();
+        layout->addWidget(method);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        QString id;
+        if (choice->currentData().metaType().id() == QMetaType::QString)
+            id = choice->currentData().toString();
+        else
         {
-            error = "Choose a supported, unique cycle shortcut.";
-            return false;
-        }
-        for (const auto &row : c.inputs)
-        {
-            if (row.label.isEmpty() || labels.contains(row.label) ||
-                !ParseInputValue(row.code.toStdString(), 0xffff, value))
-            {
-                error = "Each input needs a unique name and a valid code. Open Advanced to review codes.";
+            const auto target = discovery_.monitors[choice->currentData().toInt()];
+            SavedMonitor m;
+            m.id = NewDesktopId();
+            m.name = target.label.section(" · ", 0, 0);
+            m.route = target;
+            int suffix = 2;
+            const auto base = m.name;
+            auto exists = [&] {
+                for (const auto &other : draft_.monitors)
+                    if (other.name == m.name)
+                        return true;
                 return false;
-            }
-            labels.insert(row.label);
-            if (row.enabled)
-                ++enabled;
-            if (!validateShortcut(row.shortcut))
+            };
+            while (exists())
+                m.name = base + " " + QString::number(suffix++);
+            int matches = 0;
+            for (const auto &candidate : discovery_.monitors)
+                if (!target.identity.isEmpty() && candidate.identity == target.identity)
+                    ++matches;
+            if (matches == 1)
+                m.identity = target.identity;
+            m.method = method->currentData().toString();
+            m.inputs = DefaultMonitorInputs(m.method);
+            confirmed_[m.id] = target;
+            id = m.id;
+            draft_.monitors.push_back(m);
+        }
+        active().monitors.push_back(id);
+        for (auto &a : active().actions)
+            a.inputs[id] = {}; // require an explicit per-monitor mapping
+        populateProfile();
+        dirty();
+    }
+    void editMonitor(const QString &id)
+    {
+        captureDraft();
+        const auto *original = FindMonitor(draft_, id);
+        if (!original)
+            return;
+        auto next = *original;
+        QDialog dialog(this);
+        dialog.setWindowTitle("Monitor settings");
+        dialog.resize(560, 470);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *hint = new QLabel("These settings are shared by every profile using this monitor.");
+        hint->setWordWrap(true);
+        layout->addWidget(hint);
+        auto *form = new QFormLayout;
+        auto *name = new QLineEdit(next.name);
+        name->setMaxLength(100);
+        name->setObjectName("monitorName");
+        auto *method = new QComboBox;
+        method->setObjectName("monitorMethod");
+        method->addItem("LG alternate (0xF4)", "lg");
+        method->addItem("Standard DDC/CI (0x60) · Dell and other compatible monitors", "standard");
+        method->setCurrentIndex(method->findData(next.method));
+        auto *source = new QLineEdit(next.source);
+        source->setObjectName("monitorSource");
+        form->addRow("Monitor name", name);
+        form->addRow("Switching method", method);
+        form->addRow("LG I²C source address", source);
+        source->setEnabled(next.method == "lg");
+        connect(method, &QComboBox::currentIndexChanged, &dialog,
+                [method, source] { source->setEnabled(method->currentData() == "lg"); });
+        auto *methodHint =
+            new QLabel("Standard switching uses input control 0x60 and source 0x51. Input values still "
+                       "depend on the monitor. After changing methods, review the codes or load presets; "
+                       "custom LG codes are not translated automatically.");
+        methodHint->setWordWrap(true);
+        form->addRow(methodHint);
+        layout->addLayout(form);
+        auto *inputs = new QTableWidget(0, 2);
+        inputs->setObjectName("monitorInputs");
+        inputs->setHorizontalHeaderLabels({"Input name", "Code"});
+        inputs->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+        auto append = [&](const DesktopInput &input) {
+            const int row = inputs->rowCount();
+            inputs->insertRow(row);
+            auto *label = new QTableWidgetItem(input.label);
+            label->setData(Qt::UserRole, input.id);
+            inputs->setItem(row, 0, label);
+            inputs->setItem(row, 1, new QTableWidgetItem(input.code));
+        };
+        for (const auto &input : next.inputs)
+            append(input);
+        layout->addWidget(inputs);
+        auto *row = new QHBoxLayout;
+        auto *add = new QPushButton("Add input");
+        auto *remove = new QPushButton("Remove input");
+        row->addWidget(add);
+        row->addWidget(remove);
+        row->addStretch();
+        layout->addLayout(row);
+        connect(add, &QPushButton::clicked, &dialog, [&, append] {
+            if (inputs->rowCount() < 64)
+                append({"New input", "0x00", {}, true, NewDesktopId()});
+        });
+        connect(remove, &QPushButton::clicked, &dialog, [&, id] {
+            const int row = inputs->currentRow();
+            if (row < 0 || inputs->rowCount() <= 1)
+                return;
+            const auto inputId = inputs->item(row, 0)->data(Qt::UserRole).toString();
+            for (const auto &profile : draft_.profiles)
+                for (const auto &a : profile.actions)
+                    if (a.inputs.value(id) == inputId)
+                    {
+                        QMessageBox::information(
+                            &dialog, "Input in use",
+                            "Choose a different input in all actions using this input before removing it.");
+                        return;
+                    }
+            inputs->removeRow(row);
+        });
+        auto *presets = new QPushButton("Load method presets");
+        presets->setObjectName("loadMonitorPresets");
+        auto *advertised = new QPushButton("Read advertised inputs");
+        advertised->setObjectName("readMonitorInputs");
+        auto *discoveryButtons = new QHBoxLayout;
+        discoveryButtons->addWidget(presets);
+        discoveryButtons->addWidget(advertised);
+        layout->addLayout(discoveryButtons);
+        auto *error = new QLabel;
+        error->setWordWrap(true);
+        layout->addWidget(error);
+        connect(presets, &QPushButton::clicked, &dialog, [&, append] {
+            if (QMessageBox::question(&dialog, "Load input presets",
+                                      "Replace this monitor’s input list with the selected method’s common "
+                                      "inputs? Existing action mappings that cannot be matched by input name "
+                                      "will need to be selected again before saving.") != QMessageBox::Yes)
+                return;
+            auto defaults = DefaultMonitorInputs(method->currentData().toString());
+            auto canonical = [](QString name) {
+                name.remove(' ');
+                if (name.compare("DisplayPort", Qt::CaseInsensitive) == 0)
+                    name += '1';
+                return name.toLower();
+            };
+            for (auto &input : defaults)
+                for (int i = 0; i < inputs->rowCount(); ++i)
+                    if (canonical(inputs->item(i, 0)->text()) == canonical(input.label))
+                        input.id = inputs->item(i, 0)->data(Qt::UserRole).toString();
+            inputs->setRowCount(0);
+            for (const auto &input : defaults)
+                append(input);
+            error->setText("Presets loaded. Review these codes for your monitor, then review all affected "
+                           "profile actions.");
+        });
+        connect(advertised, &QPushButton::clicked, &dialog, [&, append] {
+            if (preview_)
             {
-                error = "Shortcuts must be unique. Use Ctrl/Alt/Shift with a letter, number or F-key.";
-                return false;
+                error->setText("Design preview · monitor queries are disabled.");
+                return;
             }
-        }
-        if (!enabled)
+            const auto resolution = ResolveSavedMonitor(next, discovery_, confirmed_);
+            if (!resolution.available)
+            {
+                error->setText("Select this monitor’s connection before reading advertised inputs.");
+                return;
+            }
+            DiagnosticSnapshot snapshot;
+            snapshot.selected = true;
+            snapshot.config.adapter = resolution.target.adapter;
+            snapshot.config.display = resolution.target.display;
+            snapshot.config.bus = resolution.target.bus;
+            advertised->setEnabled(false);
+            error->setText("Reading advertised inputs. No switching commands are sent…");
+            auto *watcher = new QFutureWatcher<QJsonObject>(&dialog);
+            const auto selectedMethod = method->currentData().toString();
+            method->setEnabled(false);
+            connect(
+                watcher, &QFutureWatcher<QJsonObject>::finished, &dialog,
+                [&, watcher, append, selectedMethod] {
+                    const auto checks = watcher->result();
+                    watcher->deleteLater();
+                    advertised->setEnabled(true);
+                    method->setEnabled(true);
+                    QJsonObject caps;
+#ifdef Q_OS_WIN
+                    // Windows diagnostic APIs do not establish a mapping between
+                    // native handles and AMD display indices. Never import another
+                    // display's advertised values under an assumed association.
+                    error->setText(
+                        "Use the Diagnostics report to review Windows advertised values, then add the "
+                        "matching monitor’s inputs manually. No native-to-AMD mapping is assumed.");
+                    return;
+#else
+                caps = checks["capabilities"].toObject();
+#endif
+                    const auto values = caps["advertised_input_values"]
+                                            .toObject()[selectedMethod == "standard" ? "0x60" : "0xf4"]
+                                            .toObject()["values"]
+                                            .toArray();
+                    int added = 0;
+                    for (const auto &value : values)
+                    {
+                        const auto entry = value.toObject();
+                        const auto code = entry["code"].toString();
+                        unsigned int wanted;
+                        if (!ParseInputValue(code.toStdString(), 0xffff, wanted))
+                            continue;
+                        bool exists = false;
+                        for (int i = 0; i < inputs->rowCount(); ++i)
+                        {
+                            unsigned int current;
+                            if (ParseInputValue(inputs->item(i, 1)->text().toStdString(), 0xffff, current) &&
+                                current == wanted)
+                                exists = true;
+                        }
+                        if (!exists && inputs->rowCount() < 64)
+                        {
+                            append({entry["standard_name"].toString("Input " + code),
+                                    code,
+                                    {},
+                                    true,
+                                    NewDesktopId()});
+                            ++added;
+                        }
+                    }
+                    error->setText(QString("%1 advertised input(s) added. Existing mappings were kept. "
+                                           "Advertised values do not guarantee switching support.")
+                                       .arg(added));
+                });
+            watcher->setFuture(QtConcurrent::run(
+                &worker_, [snapshot] { return CollectDesktopDiagnostics(snapshot, false); }));
+        });
+#ifdef Q_OS_WIN
+        advertised->setEnabled(false);
+        advertised->setToolTip("Review Diagnostics and add codes manually; native and AMD display "
+                               "identifiers have no verified mapping.");
+#endif
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+            next.name = name->text().trimmed();
+            next.source = source->text().trimmed();
+            next.method = method->currentData().toString();
+            next.inputs.clear();
+            QSet<QString> labels;
+            unsigned int value;
+            if (next.name.isEmpty() ||
+                (next.method == "lg" && !ParseInputValue(next.source.toStdString(), 0xff, value)))
+            {
+                error->setText("Enter a monitor name and a valid source address.");
+                return;
+            }
+            for (const auto &m : draft_.monitors)
+                if (m.id != id && m.name == next.name)
+                {
+                    error->setText("Monitor names must be unique.");
+                    return;
+                }
+            for (int i = 0; i < inputs->rowCount(); ++i)
+            {
+                const auto label = inputs->item(i, 0)->text().trimmed(),
+                           code = inputs->item(i, 1)->text().trimmed();
+                if (label.isEmpty() || labels.contains(label) ||
+                    !ParseInputValue(code.toStdString(), 0xffff, value))
+                {
+                    error->setText("Each input needs a unique name and a valid code.");
+                    return;
+                }
+                labels.insert(label);
+                next.inputs.push_back(
+                    {label, code, {}, true, inputs->item(i, 0)->data(Qt::UserRole).toString()});
+            }
+            dialog.accept();
+        });
+        // Native shortcuts must not switch monitors while editing or reading
+        // their mappings in this modal dialog.
+        const bool wasBusy = busy_;
+        busy_ = true;
+        updateActions();
+        const auto accepted = dialog.exec() == QDialog::Accepted;
+        busy_ = wasBusy;
+        if (accepted)
         {
-            error = "Enable at least one input.";
-            return false;
+            *monitor(id) = next;
+            for (auto &profile : draft_.profiles)
+                for (auto &action : profile.actions)
+                    if (action.inputs.contains(id) && !FindMonitorInput(next, action.inputs.value(id)))
+                        action.inputs[id] = {};
+            populateProfile();
+            dirty();
         }
-        return true;
+        updateActions();
+    }
+    void manageMonitors()
+    {
+        captureDraft();
+        QDialog dialog(this);
+        dialog.setWindowTitle("Saved monitors");
+        dialog.resize(540, 280);
+        auto *layout = new QVBoxLayout(&dialog);
+        auto *list = new QListWidget;
+        layout->addWidget(list);
+        auto rebuild = [&] {
+            list->clear();
+            for (const auto &m : draft_.monitors)
+            {
+                auto *item = new QListWidgetItem(m.name, list);
+                item->setData(Qt::UserRole, m.id);
+            }
+        };
+        rebuild();
+        auto *row = new QHBoxLayout;
+        auto *edit = new QPushButton("Edit…"), *remove = new QPushButton("Delete unused monitor");
+        row->addWidget(edit);
+        row->addWidget(remove);
+        layout->addLayout(row);
+        connect(edit, &QPushButton::clicked, &dialog, [&] {
+            if (list->currentItem())
+            {
+                editMonitor(list->currentItem()->data(Qt::UserRole).toString());
+                rebuild();
+            }
+        });
+        connect(remove, &QPushButton::clicked, &dialog, [&] {
+            if (!list->currentItem())
+                return;
+            const auto id = list->currentItem()->data(Qt::UserRole).toString();
+            for (const auto &p : draft_.profiles)
+                if (p.monitors.contains(id))
+                {
+                    QMessageBox::information(
+                        &dialog, "Monitor in use",
+                        "Remove this monitor from its profiles before deleting its saved mapping.");
+                    return;
+                }
+            for (int i = 0; i < draft_.monitors.size(); ++i)
+                if (draft_.monitors[i].id == id)
+                {
+                    draft_.monitors.removeAt(i);
+                    break;
+                }
+            confirmed_.remove(id);
+            dirty();
+            rebuild();
+        });
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        dialog.exec();
     }
     void save()
     {
@@ -228,142 +773,157 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             message("Design preview · nothing is saved and no monitor commands are sent.");
             return;
         }
-        auto next = collect();
+        captureDraft();
         QString error;
-        if (!validate(next, error) || !SaveDesktopConfig(next, error))
+        if (configurationBlocked_ || !SaveDesktopWorkspace(draft_, error))
         {
-            message(error);
+            message(error.isEmpty() ? "Saving is blocked to preserve the unreadable configuration." : error);
             return;
         }
-        if (config_.adapter != next.adapter || config_.display != next.display || config_.bus != next.bus ||
-            config_.source != next.source)
-            history_.reset();
-        config_ = next;
+        session_.configurationChanged(saved_, draft_);
+        lastResults_.clear();
+        saved_ = draft_;
+        config_ = saved_.preferences;
         dirty_ = false;
-        position_ = -1;
         save_->setText("Saved");
-        message(monitors_->currentIndex() < 0
-                    ? "Settings saved. Select an available monitor before switching."
-                    : "Settings saved. Ready to switch.");
+        message("Profiles saved. Each shortcut controls its named profile, whichever tab is open.");
         registerHotkeys(true);
-        rebuildMenu();
+        showResults();
+        updateActions();
 #ifdef Q_OS_WIN
         if (!SetStartWithWindows(config_.startup))
-            message("Settings saved, but Windows startup could not be updated.");
+            message("Profiles saved, but Windows startup could not be updated.");
 #else
         if (!SetDesktopAutostart(config_.startup, error))
         {
             config_.startup = DesktopAutostartEnabled();
+            saved_.preferences.startup = draft_.preferences.startup = config_.startup;
             const QSignalBlocker blocker(startup_);
             startup_->setChecked(config_.startup);
-            message("Settings saved, but startup could not be updated. " + error);
+            message("Profiles saved, but startup could not be updated. " + error);
         }
 #endif
     }
-    void syncShortcut(int index, const QKeySequence &key)
+    void syncShortcut(const QString &profileId, const QString &actionId, const QKeySequence &key)
     {
         const auto text = key.toString(QKeySequence::PortableText).toUpper();
-        QKeySequenceEdit *editor = nullptr;
-        if (index == -1)
+        auto apply = [&](DesktopWorkspace &w) {
+            for (auto &p : w.profiles)
+                if (p.id == profileId)
+                {
+                    if (actionId == "cycle")
+                        p.cycleShortcut = text;
+                    else if (actionId == "previous")
+                        p.previousShortcut = text;
+                    else
+                        for (auto &a : p.actions)
+                            if (a.id == actionId)
+                                a.shortcut = text;
+                }
+        };
+        apply(saved_);
+        // External changes update saved state. Keep in-progress form edits as
+        // drafts, including edits on a different profile's tab.
+        if (!dirty_)
         {
-            config_.cycleShortcut = text;
-            editor = cycleShortcut_;
-        }
-        else if (index == -2)
-        {
-            config_.previousShortcut = text;
-            editor = previousShortcut_;
-        }
-        else if (index >= 0 && index < config_.inputs.size())
-        {
-            config_.inputs[index].shortcut = text;
-            editor = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(index, 3));
-        }
-        if (editor && !dirty_)
-        {
-            QSignalBlocker block(editor);
-            editor->setKeySequence(key);
+            apply(draft_);
+            if (profileId == activeId_)
+            {
+                QKeySequenceEdit *editor = nullptr;
+                if (actionId == "cycle")
+                    editor = cycleShortcut_;
+                else if (actionId == "previous")
+                    editor = previousShortcut_;
+                else
+                    for (int i = 0; i < active().actions.size(); ++i)
+                        if (active().actions[i].id == actionId)
+                            editor = qobject_cast<QKeySequenceEdit *>(
+                                table_->cellWidget(i, 2 + active().monitors.size()));
+                if (editor)
+                {
+                    const QSignalBlocker block(editor);
+                    editor->setKeySequence(key);
+                }
+            }
         }
         QString error;
-        if (!preview_ && !SaveDesktopShortcutPreferences(config_, error))
+        if (!preview_ && !configurationBlocked_ && !registeringShortcuts_ &&
+            !SaveDesktopWorkspace(saved_, error))
             message(error);
+    }
+    QString shortcutId(const MonitorProfile &p, const QString &actionId) const
+    {
+        return p.id == "default" ? actionId : "profile-" + p.id + "-" + actionId;
     }
     void registerHotkeys(bool applyEdits = false)
     {
-        if (preview_)
+        if (preview_ || configurationBlocked_)
             return;
+        const QScopedValueRollback<bool> registering(registeringShortcuts_, true);
 #ifdef Q_OS_WIN
         Q_UNUSED(applyEdits);
         for (const auto &item : hotkeys_)
             UnregisterHotKey(nullptr, item.first);
         hotkeys_.clear();
         int id = 1;
-        bool failed = false;
-        auto bind = [&](const QString &text, int index) {
+        QStringList failed;
+        auto bind = [&](const MonitorProfile &p, const QString &actionId, const QString &label,
+                        const QString &text) {
             if (text.isEmpty())
                 return;
             HotkeySpec spec{};
             if (ParseHotkey(text.toStdString(), spec) &&
                 RegisterHotKey(nullptr, id, spec.fsModifiers | MOD_NOREPEAT, spec.vk))
-                hotkeys_[id] = index;
+                hotkeys_[id] = {p.id, actionId};
             else
-                failed = true;
+                failed.push_back(p.name + " → " + label);
             ++id;
         };
-        bind(config_.cycleShortcut, -1);
-        bind(config_.previousShortcut, -2);
-        for (int i = 0; i < config_.inputs.size(); ++i)
-            if (config_.inputs[i].enabled)
-                bind(config_.inputs[i].shortcut, i);
-        if (failed)
-            message("Some shortcuts are invalid or in use. Choose different shortcuts and save.");
 #else
-        if (qEnvironmentVariableIsSet("LG_INPUT_SWITCH_DEBUG"))
-            qInfo() << "KDE shortcut startup:" << "preview" << preview_ << "available" << kdeAvailable_
-                    << "enabled" << config_.globalShortcuts << "apply" << applyEdits;
         kdeShortcuts_.clear();
         if (!kdeAvailable_)
             return;
         QStringList failed;
-        auto bind = [&](const QString &id, const QString &label, const QString &text, int index) {
-            const auto key = QKeySequence::fromString(text, QKeySequence::PortableText);
-            const bool accepted = kdeShortcuts_.bind(
-                id, label, key, [this, index] { sendInput(index); },
-                [this, index](const QKeySequence &actual) { syncShortcut(index, actual); }, applyEdits,
-                config_.globalShortcuts);
-            if (qEnvironmentVariableIsSet("LG_INPUT_SWITCH_DEBUG"))
-                qInfo() << "KDE action" << id << "accepted" << accepted;
-            if (!accepted)
-                failed.push_back(label);
+        auto bind = [&](const MonitorProfile &p, const QString &actionId, const QString &label,
+                        const QString &text) {
+            const auto profileId = p.id;
+            if (!kdeShortcuts_.bind(
+                    shortcutId(p, actionId), p.name + " → " + label,
+                    QKeySequence::fromString(text, QKeySequence::PortableText),
+                    [this, profileId, actionId] { sendInput(profileId, actionId); },
+                    [this, profileId, actionId](const QKeySequence &actual) {
+                        syncShortcut(profileId, actionId, actual);
+                    },
+                    applyEdits, config_.globalShortcuts))
+                failed.push_back(p.name + " → " + label);
         };
-        bind("cycle", "Cycle inputs", config_.cycleShortcut, -1);
-        bind("previous", "Previous input", config_.previousShortcut, -2);
-        for (int i = 0; i < config_.inputs.size(); ++i)
-            if (config_.inputs[i].enabled)
-            {
-                const auto &row = config_.inputs[i];
-                const auto id =
-                    "input-" +
-                    QString::fromLatin1(
-                        QCryptographicHash::hash(row.label.toUtf8(), QCryptographicHash::Sha256).toHex());
-                bind(id, "Switch to " + row.label, row.shortcut, i);
-            }
-        // All current catalogue actions now exist; remove obsolete disabled or
-        // renamed input actions from this application's component only.
+#endif
+        // Callbacks can update saved keys synchronously: iterate a stable copy.
+        const auto profiles = saved_.profiles;
+        for (const auto &p : profiles)
+        {
+            bind(p, "cycle", "Cycle inputs", p.cycleShortcut);
+            bind(p, "previous", "Previous input", p.previousShortcut);
+            for (const auto &a : p.actions)
+                if (a.enabled)
+                    bind(p, a.id, a.name, a.shortcut);
+        }
+#ifndef Q_OS_WIN
         if (config_.globalShortcuts && failed.isEmpty())
             kdeShortcuts_.pruneInactive();
-        if (!failed.isEmpty())
-            message("Shortcut unavailable: " + failed.join(", ") + ". Existing assignments were not stolen.");
 #endif
+        if (!failed.isEmpty())
+            message("Shortcut unavailable: " + failed.join(", ") +
+                    ". Choose another shortcut; existing assignments were not stolen.");
     }
-    void sendInput(int index)
+    void sendInput(const QString &profileId, QString actionId, bool retry = false)
     {
         if (preview_)
         {
             message("Design preview · switching is disabled.");
             return;
         }
-        if (busy_)
+        if (busy_ || recordingShortcut_ || configurationBlocked_)
             return;
         if (dirty_)
         {
@@ -371,78 +931,119 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             showWindow();
             return;
         }
-        if (monitors_->currentIndex() < 0)
-        {
-            message("Select an available monitor and save first.");
-            showWindow();
+        const auto *profile = FindProfile(saved_, profileId);
+        if (!profile)
             return;
-        }
         if (lastSend_.isValid() && lastSend_.elapsed() < config_.debounce)
             return;
-        if (index == -2)
+        if (actionId == "cycle")
+            actionId = session_.cycle(*profile);
+        if (actionId == "previous")
+            actionId = session_.previous(profileId);
+        const auto pending = session_.state(profileId).pending;
+        QStringList only;
+        if (retry)
         {
-            const auto previous = QString::fromStdString(history_.previous());
-            index = -3;
-            for (int i = 0; i < config_.inputs.size(); ++i)
-                if (config_.inputs[i].label == previous && config_.inputs[i].enabled)
-                    index = i;
-            if (index < 0)
-            {
-                message("No previous input is known yet. Select two different enabled inputs first.");
+            if (pending.monitors.isEmpty() || pending.failedMonitors().isEmpty())
                 return;
-            }
+            actionId = pending.actionId;
+            only = pending.failedMonitors();
         }
-        if (index == -1)
+        bool exists = false;
+        for (const auto &a : profile->actions)
+            if (a.enabled && a.id == actionId)
+                exists = true;
+        if (!exists)
         {
-            int next = position_;
-            for (int n = 0; n < config_.inputs.size(); ++n)
-            {
-                next = (next + 1) % config_.inputs.size();
-                if (config_.inputs[next].enabled)
-                {
-                    index = next;
-                    break;
-                }
-            }
-        }
-        if (index < 0 || index >= config_.inputs.size() || !config_.inputs[index].enabled)
+            message("No previous action is known yet. Send two different actions first.");
             return;
+        }
+        const auto snapshot = saved_;
+        const auto confirmed = confirmed_;
         lastSend_.restart();
         setBusy(true);
-        message("Sending input command…");
-        const auto snapshot = config_;
-        const auto row = config_.inputs[index];
-        auto *watcher = new QFutureWatcher<lg::SwitchResult>(this);
-        connect(watcher, &QFutureWatcher<lg::SwitchResult>::finished, this, [this, watcher, index, row, snapshot] {
-            auto result = watcher->result();
-            watcher->deleteLater();
-            unsigned int value = 0, source = 0;
-            ParseInputValue(row.code.toStdString(), 0xffff, value);
-            ParseInputValue(snapshot.source.toStdString(), 0xff, source);
-            lastCommand_ = {{"status", result.sent() ? "command sent; physical switch unverified" : "failed"},
-                {"native_code", result.nativeCode}, {"adapter", snapshot.adapter},
-                {snapshot.bus ? "i2c_bus" : "display", snapshot.display},
-                {"source", QString("0x%1").arg(source, 2, 16, QChar('0'))},
-                {"input", QString("0x%1").arg(value, 4, 16, QChar('0'))}};
-            setBusy(false);
-            if (result.sent())
-            {
-                position_ = index;
-                history_.sent(row.label.toStdString());
-                rebuildMenu();
-            }
-            const auto text =
-                result.sent()
-                    ? row.label + " command sent. Check the monitor; this input path has no confirmation."
-                    : QString::fromStdString(result.detail);
-            message(text);
-            if (config_.notifications && tray_->isVisible())
-                tray_->showMessage("LG Input Switch", text,
-                                   result.sent() ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning);
-        });
-        watcher->setFuture(
-            QtConcurrent::run(&worker_, [snapshot, row] { return SendDesktopInput(snapshot, row.code); }));
+        message("Sending profile commands…");
+        auto *watcher = new QFutureWatcher<ProfileSwitchResult>(this);
+        connect(watcher, &QFutureWatcher<ProfileSwitchResult>::finished, this,
+                [this, watcher, snapshot, retry] {
+                    const auto result = watcher->result();
+                    watcher->deleteLater();
+                    discovery_ = result.discovery;
+                    populateMembers();
+                    session_.accept(snapshot, result, retry);
+                    auto display = result;
+                    if (retry && lastResults_.contains(result.profileId))
+                    {
+                        display = lastResults_.value(result.profileId);
+                        for (const auto &entry : result.monitors)
+                            for (auto &old : display.monitors)
+                                if (old.monitorId == entry.monitorId)
+                                    old = entry;
+                    }
+                    for (auto it = lastResults_.begin(); it != lastResults_.end();)
+                    {
+                        const auto *other = FindProfile(snapshot, it.key());
+                        bool overlaps = false;
+                        if (other && it.key() != result.profileId)
+                            for (const auto &entry : result.monitors)
+                                if (entry.result.sent() && other->monitors.contains(entry.monitorId))
+                                    overlaps = true;
+                        if (overlaps)
+                            it = lastResults_.erase(it);
+                        else
+                            ++it;
+                    }
+                    lastResults_[result.profileId] = display;
+                    // Record the actual current attempt, not unsaved UI fields, and
+                    // report every target without custom labels or identity hashes.
+                    lastCommand_ = ProfileCommandDiagnostics(snapshot, result);
+                    const auto *p = FindProfile(snapshot, result.profileId);
+                    int sent = 0;
+                    for (const auto &m : result.monitors)
+                        if (m.result.sent())
+                            ++sent;
+                    setBusy(false);
+                    showResults();
+                    const auto text =
+                        QString("%1: %2/%3 command(s) sent. %4")
+                            .arg(p ? p->name : "Profile")
+                            .arg(sent)
+                            .arg(result.monitors.size())
+                            .arg(result.complete()
+                                     ? "Physical input changes are unverified."
+                                     : "See per-monitor results; retry failed monitors when ready.");
+                    message(text);
+                    if (config_.notifications && tray_->isVisible())
+                        tray_->showMessage("LG Input Switch", text,
+                                           result.complete() ? QSystemTrayIcon::Information
+                                                             : QSystemTrayIcon::Warning);
+                });
+        watcher->setFuture(QtConcurrent::run(&worker_, [snapshot, profileId, actionId, confirmed, only] {
+            // Re-enumerate immediately before dispatch; never send to an index
+            // that now belongs to a different monitor after reconnect.
+            return SendProfileAction(snapshot, profileId, actionId, {}, confirmed, only, SendDesktopInput,
+                                     DiscoverDesktopMonitors);
+        }));
     }
+    void showResults()
+    {
+        const auto state = session_.state(activeId_);
+        const auto result = !state.pending.monitors.isEmpty() ? state.pending : ProfileSwitchResult{};
+        // Successful results also remain visible when returning to a tab.
+        const auto display = lastResults_.contains(activeId_) ? lastResults_.value(activeId_) : result;
+        QStringList lines;
+        for (const auto &entry : display.monitors)
+        {
+            const auto *m = FindMonitor(saved_, entry.monitorId);
+            const auto *input = m ? FindMonitorInput(*m, entry.inputId) : nullptr;
+            lines.push_back((m ? m->name : "Monitor") + " → " + (input ? input->label : "Input") + ": " +
+                            entry.status);
+        }
+        results_->setPlainText(lines.join('\n'));
+        results_->setVisible(!lines.isEmpty());
+        updateActions();
+    }
+    QMap<QString, ProfileSwitchResult> lastResults_;
     void refresh()
     {
         if (busy_)
@@ -451,30 +1052,69 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         message("Looking for connected monitors…");
         auto *watcher = new QFutureWatcher<Discovery>(this);
         connect(watcher, &QFutureWatcher<Discovery>::finished, this, [this, watcher] {
-            const auto result = watcher->result();
+            discovery_ = watcher->result();
             watcher->deleteLater();
-            detected_ = result.monitors;
-            QSignalBlocker blocker(monitors_);
-            monitors_->clear();
-            int selected = -1;
-            for (int i = 0; i < detected_.size(); ++i)
-            {
-                const auto &m = detected_[i];
-                monitors_->addItem(m.label);
-                if (m.adapter == config_.adapter && m.display == config_.display && m.bus == config_.bus)
-                    selected = i;
-            }
-            // Never silently select a different monitor after topology changes.
-            monitors_->setCurrentIndex(selected);
+            populateMembers();
             setBusy(false);
-            message(result.message);
+            message(discovery_.message);
         });
         watcher->setFuture(QtConcurrent::run(&worker_, [] { return DiscoverDesktopMonitors(); }));
     }
+    DiagnosticSnapshot diagnosticSnapshot()
+    {
+        captureDraft();
+        DiagnosticSnapshot snapshot;
+        snapshot.unsaved = dirty_;
+        snapshot.lastCommand = lastCommand_;
+        snapshot.profileCount = draft_.profiles.size();
+        for (const auto &id : active().monitors)
+            if (const auto *m = FindMonitor(draft_, id))
+            {
+                const auto resolution = ResolveSavedMonitor(*m, discovery_, confirmed_);
+                DesktopConfig c = draft_.preferences;
+                c.adapter = resolution.available ? resolution.target.adapter : m->route.adapter;
+                c.display = resolution.available ? resolution.target.display : m->route.display;
+                c.bus = resolution.available ? resolution.target.bus : m->route.bus;
+                c.method = m->method;
+                c.source = m->method == "standard" ? "0x51" : m->source;
+                c.inputs = m->inputs;
+                int index = -1;
+                for (int i = 0; i < draft_.monitors.size(); ++i)
+                    if (draft_.monitors[i].id == id)
+                        index = i;
+                snapshot.monitors.push_back({c, resolution.available, index});
+            }
+        for (const auto &action : active().actions)
+        {
+            QJsonArray targets;
+            for (int i = 0; i < draft_.monitors.size(); ++i)
+            {
+                const auto &m = draft_.monitors[i];
+                if (!action.inputs.contains(m.id))
+                    continue;
+                const auto *input = FindMonitorInput(m, action.inputs.value(m.id));
+                unsigned int code;
+                targets.append(
+                    QJsonObject{{"monitor_index", i},
+                                {"feature", m.method == "standard" ? "0x60" : "0xf4"},
+                                {"input", input && ParseInputValue(input->code.toStdString(), 0xffff, code)
+                                              ? QString("0x%1").arg(code, 4, 16, QChar('0'))
+                                              : "invalid"}});
+            }
+            snapshot.actions.append(QJsonObject{{"enabled", action.enabled}, {"targets", targets}});
+        }
+        if (!snapshot.monitors.isEmpty())
+        {
+            snapshot.config = snapshot.monitors.front().config;
+            snapshot.selected = snapshot.monitors.front().selected;
+        }
+        return snapshot;
+    }
     void diagnostics()
     {
-        if (busy_) return;
-        const DiagnosticSnapshot snapshot{collect(), monitors_->currentIndex() >= 0, dirty_, lastCommand_};
+        if (busy_)
+            return;
+        const auto snapshot = diagnosticSnapshot();
         diagnosticReport_->setPlainText("Reading diagnostic information…");
         diagnosticCopy_->setEnabled(false);
         diagnosticSave_->setEnabled(false);
@@ -494,26 +1134,41 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             return CollectDesktopDiagnostics(snapshot, preview);
         }));
     }
-    void rebuildMenu()
+    void updateActions()
     {
+        if (!menu_)
+            return;
+        const bool usable = !busy_ && !dirty_ && !configurationBlocked_;
+        cycle_->setEnabled(!busy_);
+        previous_->setEnabled(usable && !session_.previous(activeId_).isEmpty());
+        retry_->setEnabled(usable && !session_.state(activeId_).pending.failedMonitors().isEmpty());
+        removeProfile_->setEnabled(!busy_ && draft_.profiles.size() > 1);
+        addProfile_->setEnabled(!busy_ && draft_.profiles.size() < 32);
+        addMonitor_->setEnabled(!busy_ && active().monitors.size() < 16);
         menu_->clear();
-        auto *open = menu_->addAction("Open LG Input Switch");
-        connect(open, &QAction::triggered, this, [this] { showWindow(); });
+        connect(menu_->addAction("Open LG Input Switch"), &QAction::triggered, this,
+                [this] { showWindow(); });
         menu_->addSeparator();
-        auto *cycle = menu_->addAction("Cycle inputs");
-        cycle->setEnabled(!busy_ && !dirty_ && monitors_->currentIndex() >= 0);
-        connect(cycle, &QAction::triggered, this, [this] { sendInput(-1); });
-        auto *previous = menu_->addAction("Previous input");
-        previous->setEnabled(!busy_ && !dirty_ && !history_.previous().empty() &&
-                             monitors_->currentIndex() >= 0);
-        connect(previous, &QAction::triggered, this, [this] { sendInput(-2); });
-        for (int i = 0; i < config_.inputs.size(); ++i)
-            if (config_.inputs[i].enabled)
-            {
-                auto *action = menu_->addAction(config_.inputs[i].label);
-                action->setEnabled(!busy_ && !dirty_ && monitors_->currentIndex() >= 0);
-                connect(action, &QAction::triggered, this, [this, i] { sendInput(i); });
-            }
+        for (const auto &p : saved_.profiles)
+        {
+            auto *submenu = menu_->addMenu(p.name);
+            auto bind = [&](const QString &label, const QString &id, bool enabled) {
+                auto *a = submenu->addAction(label);
+                a->setEnabled(usable && enabled);
+                connect(a, &QAction::triggered, this,
+                        [this, profileId = p.id, id] { sendInput(profileId, id); });
+            };
+            bind("Cycle inputs", "cycle", true);
+            bind("Previous input", "previous", !session_.previous(p.id).isEmpty());
+            const auto pending = session_.state(p.id).pending;
+            auto *retry = submenu->addAction("Retry failed monitors");
+            retry->setEnabled(usable && !pending.failedMonitors().isEmpty());
+            connect(retry, &QAction::triggered, this, [this, id = p.id] { sendInput(id, {}, true); });
+            submenu->addSeparator();
+            for (const auto &a : p.actions)
+                if (a.enabled)
+                    bind(a.name, a.id, true);
+        }
         menu_->addSeparator();
         connect(menu_->addAction("Quit"), &QAction::triggered, this, [this] { quit(); });
     }
@@ -561,27 +1216,29 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                         "Source and license</a>")
                     .arg(dark ? "#91baff" : "#2458bd"));
         qApp->setStyleSheet(
-            QString("QWidget{font-size:13px;color:%1;} QWidget#root{background:%2;}"
-                    "QFrame#card{background:%3;border:1px solid %4;border-radius:12px;}"
-                    "QLabel#title{font-size:27px;font-weight:700;} QLabel#muted,QLabel#status{color:%5;} "
-                    "QLabel#section{font-size:16px;font-weight:600;}"
-                    "QPushButton{padding:8px 14px;background:%3;border:1px solid %4;border-radius:7px;} "
-                    "QPushButton:hover{border-color:#3268e8;}"
-                    "QPushButton:focus,QLineEdit:focus,QComboBox:focus{border:2px solid #3268e8;}"
-                    "QPushButton#primary{background:#3268e8;color:white;border:1px solid "
-                    "#3268e8;font-weight:600;}"
-                    "QPushButton:disabled{color:%5;} "
-                    "QLineEdit,QSpinBox,QComboBox,QKeySequenceEdit{background:%6;border:1px solid "
-                    "%4;border-radius:6px;padding:7px;}"
-                    "QTableWidget{background:%3;border:0;gridline-color:%4;selection-background-color:%6;}"
-                    "QHeaderView::section{background:%3;color:%5;border:0;border-bottom:1px solid "
-                    "%4;padding:10px;text-align:left;}"
-                    "QTabWidget::pane{border:0;} QTabBar::tab{padding:10px 16px;color:%5;border-bottom:2px "
-                    "solid transparent;}"
-                    "QTabBar::tab:selected{color:%1;border-bottom:2px solid #3268e8;} "
-                    "QMenu{background:%3;border:1px solid %4;padding:6px;}"
-                    "QMenu::item{padding:8px 24px;} QMenu::item:selected{background:#3268e8;color:white;} "
-                    "QToolTip{background:%3;color:%1;border:1px solid %4;}")
+            QString(
+                "QWidget{font-size:13px;color:%1;} QWidget#root{background:%2;}"
+                "QFrame#card{background:%3;border:1px solid %4;border-radius:12px;}"
+                "QLabel#title{font-size:27px;font-weight:700;} QLabel#muted,QLabel#status{color:%5;} "
+                "QLabel#section{font-size:16px;font-weight:600;}"
+                "QPushButton{padding:8px 14px;background:%3;border:1px solid %4;border-radius:7px;} "
+                "QPushButton:hover{border-color:#3268e8;}"
+                "QPushButton:focus,QLineEdit:focus,QComboBox:focus{border:2px solid #3268e8;}"
+                "QPushButton#primary{background:#3268e8;color:white;border:1px solid "
+                "#3268e8;font-weight:600;}"
+                "QPushButton:disabled{color:%5;} "
+                "QLineEdit,QSpinBox,QComboBox,QKeySequenceEdit{background:%6;border:1px solid "
+                "%4;border-radius:6px;padding:7px;}"
+                "QTableWidget{background:%3;border:0;gridline-color:%4;selection-background-color:%6;}"
+                "QTableWidget QComboBox,QTableWidget QPushButton,QTableWidget QKeySequenceEdit{margin:3px;}"
+                "QHeaderView::section{background:%3;color:%5;border:0;border-bottom:1px solid "
+                "%4;padding:10px;text-align:left;}"
+                "QTabWidget::pane{border:0;} QTabBar::tab{padding:10px 16px;color:%5;border-bottom:2px "
+                "solid transparent;}"
+                "QTabBar::tab:selected{color:%1;border-bottom:2px solid #3268e8;} "
+                "QMenu{background:%3;border:1px solid %4;padding:6px;}"
+                "QMenu::item{padding:8px 24px;} QMenu::item:selected{background:#3268e8;color:white;} "
+                "QToolTip{background:%3;color:%1;border:1px solid %4;}")
                 .arg(text, bg, card, border, muted, field));
         setWindowIcon(MonitorIcon());
         tray_->setIcon(MonitorIcon());
@@ -615,7 +1272,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             auto found = hotkeys_.find(int(msg->wParam));
             if (found != hotkeys_.end())
             {
-                sendInput(found->second);
+                sendInput(found->second.first, found->second.second);
                 return true;
             }
         }
@@ -627,96 +1284,199 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 
   public:
     explicit DesktopWindow(bool preview, const QString &component = KdeShortcuts::applicationComponent())
-        : kdeShortcuts_(component), preview_(preview)
+        : kdeShortcuts_(component), preview_(preview), menu_(nullptr)
     {
         QString warning;
-        if (!preview)
-            config_ = LoadDesktopConfig(warning);
+        saved_ = preview ? MigrateDesktopConfig(DesktopConfig{}) : LoadDesktopWorkspace(warning);
+        configurationBlocked_ = warning.startsWith("Saved profiles could not be read.");
+        if (preview)
+        {
+            saved_.monitors[0].route = {"LG UltraGear · Design preview", 0, 1, true, QString(64, 'a')};
+            saved_.monitors[0].identity = QString(64, 'a');
+            saved_.preferences.globalShortcuts = true;
+            saved_.monitors[0].name = "Main monitor";
+            auto side = saved_.monitors[0];
+            side.id = "preview-side";
+            side.name = "Side monitor";
+            side.method = "standard";
+            for (auto &input : side.inputs)
+            {
+                if (input.label == "DisplayPort")
+                    input.code = "0x0f";
+                else if (input.label == "HDMI1")
+                    input.code = "0x11";
+                else if (input.label == "HDMI2")
+                    input.code = "0x12";
+            }
+            side.route = {"Dell · I²C 9", 0, 9, true, QString(64, 'b')};
+            side.identity = QString(64, 'b');
+            saved_.monitors.push_back(side);
+            auto solo = saved_.profiles[0];
+            solo.id = "preview-side-profile";
+            solo.name = "Side monitor";
+            solo.monitors = {side.id};
+            solo.cycleShortcut.clear();
+            solo.previousShortcut.clear();
+            for (auto &a : solo.actions)
+            {
+                a.shortcut.clear();
+                a.inputs = {{side.id, a.inputs.value("monitor-1")}};
+            }
+            saved_.profiles.push_back(solo);
+            MonitorProfile group;
+            group.id = "preview-group";
+            group.name = "Both monitors";
+            group.monitors = {"monitor-1", side.id};
+            group.actions = {{"linux-pc",
+                              "Linux PC",
+                              "CTRL+ALT+7",
+                              true,
+                              {{"monitor-1", side.inputs[0].id}, {side.id, side.inputs[2].id}}},
+                             {"windows-pc",
+                              "Windows PC",
+                              "CTRL+ALT+8",
+                              true,
+                              {{"monitor-1", side.inputs[2].id}, {side.id, side.inputs[0].id}}}};
+            saved_.profiles.push_back(group);
+            discovery_.monitors = {saved_.monitors[0].route, side.route};
+        }
+        draft_ = saved_;
+        config_ = saved_.preferences;
+        activeId_ = draft_.activeProfile;
         worker_.setMaxThreadCount(1);
         setObjectName("root");
         setWindowTitle("LG Input Switch");
-        resize(900, 740);
-        setMinimumSize(800, 740);
+        resize(1080, 920);
+        setMinimumSize(860, 800);
         auto *layout = new QVBoxLayout(this);
-        layout->setContentsMargins(28, 24, 28, 20);
-        layout->setSpacing(12);
-        auto *title = new QLabel("LG Input Switch");
-        title->setObjectName("title");
-        title->setFixedHeight(40);
+        layout->setContentsMargins(24, 20, 24, 16);
+        layout->setSpacing(10);
         auto *brand = new QHBoxLayout;
         auto *logo = new QLabel;
         logo->setPixmap(MonitorIcon().pixmap(38, 38));
+        auto *title = new QLabel("LG Input Switch");
+        title->setObjectName("title");
+        title->setFixedHeight(40);
         brand->addWidget(logo);
         brand->addWidget(title, 1);
         layout->addLayout(brand);
-        subtitle_ = new QLabel("Your display. One shortcut away.");
+        subtitle_ = new QLabel("Your displays. One shortcut away.");
         subtitle_->setObjectName("muted");
-        subtitle_->setFixedHeight(24);
         layout->addWidget(subtitle_);
-        auto *monitorCard = new QFrame;
-        monitorCard->setObjectName("card");
-        monitorCard->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        auto *monitorLayout = new QVBoxLayout(monitorCard);
-        monitorLayout->setContentsMargins(18, 16, 18, 16);
-        auto *heading = new QLabel("Monitor");
+        monitorCard_ = new QFrame;
+        monitorCard_->setObjectName("card");
+        auto *monitorLayout = new QVBoxLayout(monitorCard_);
+        monitorLayout->setContentsMargins(14, 10, 14, 12);
+        auto *head = new QHBoxLayout;
+        auto *heading = new QLabel("Monitors & profiles");
         heading->setObjectName("section");
-        monitorLayout->addWidget(heading);
-        auto *targetRow = new QHBoxLayout;
-        monitors_ = new QComboBox;
-        monitors_->setObjectName("monitors");
-        monitors_->setMinimumWidth(400);
-        monitors_->setPlaceholderText("Select a monitor…");
+        head->addWidget(heading, 1);
+        addProfile_ = new QPushButton("+ Profile");
+        addProfile_->setObjectName("addProfile");
+        renameProfile_ = new QPushButton("Rename");
+        removeProfile_ = new QPushButton("Remove");
+        head->addWidget(addProfile_);
+        head->addWidget(renameProfile_);
+        head->addWidget(removeProfile_);
+        monitorLayout->addLayout(head);
+        profileTabs_ = new QTabBar;
+        profileTabs_->setObjectName("profileTabs");
+        profileTabs_->setExpanding(false);
+        profileTabs_->setUsesScrollButtons(true);
+        profileTabs_->setAccessibleName("Switching profiles");
+        monitorLayout->addWidget(profileTabs_);
+        members_ = new QTableWidget(0, 4);
+        members_->setObjectName("profileMonitors");
+        members_->setHorizontalHeaderLabels({"Saved monitor", "Connection", "Status", ""});
+        members_->verticalHeader()->hide();
+        members_->horizontalHeader()->setFixedHeight(40);
+        members_->setShowGrid(false);
+        members_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        members_->setColumnWidth(0, 155);
+        members_->setColumnWidth(3, 85);
+        members_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        members_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+        monitorLayout->addWidget(members_);
+        auto *targetButtons = new QHBoxLayout;
+        addMonitor_ = new QPushButton("+ Monitor");
+        addMonitor_->setObjectName("addMonitor");
         refresh_ = new QPushButton("Refresh");
-        targetRow->addWidget(monitors_, 1);
-        targetRow->addWidget(refresh_);
-        monitorLayout->addLayout(targetRow);
-        layout->addWidget(monitorCard);
+        refresh_->setObjectName("refreshMonitors");
+        targetButtons->addWidget(addMonitor_);
+        targetButtons->addStretch();
+        targetButtons->addWidget(refresh_);
+        monitorLayout->addLayout(targetButtons);
+        layout->addWidget(monitorCard_);
         controls_ = new QWidget;
         auto *body = new QVBoxLayout(controls_);
         body->setContentsMargins(0, 0, 0, 0);
-        auto *tabs = new QTabWidget;
-        body->addWidget(tabs);
+        tabs_ = new QTabWidget;
+        tabs_->setObjectName("mainTabs");
+        body->addWidget(tabs_);
         auto *inputs = new QFrame;
         inputs->setObjectName("card");
         auto *inputLayout = new QVBoxLayout(inputs);
-        inputLayout->setContentsMargins(16, 16, 16, 16);
-        auto *inputHeading = new QLabel("Inputs & shortcuts");
-        inputHeading->setObjectName("section");
-        inputLayout->addWidget(inputHeading);
-        auto *hint = new QLabel("Enable the inputs you use. Reorder them to choose the cycle sequence.");
+        inputLayout->setContentsMargins(14, 12, 14, 12);
+        auto *hint = new QLabel("One action switches every assigned monitor to its chosen input. Order "
+                                "actions to set the cycle sequence.");
         hint->setObjectName("muted");
+        hint->setWordWrap(true);
         inputLayout->addWidget(hint);
-        table_ = new QTableWidget(0, 5);
+        table_ = new QTableWidget;
         table_->setObjectName("inputs");
-        table_->setHorizontalHeaderLabels({"Use", "Input", "Code", "Shortcut", ""});
         table_->verticalHeader()->hide();
         table_->setShowGrid(false);
         table_->setSelectionBehavior(QAbstractItemView::SelectRows);
         table_->setSelectionMode(QAbstractItemView::SingleSelection);
-        table_->setColumnWidth(0, 44);
-        table_->setColumnWidth(2, 84);
-        table_->setColumnWidth(3, 170);
-        table_->setColumnWidth(4, 90);
-        table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-        table_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        table_->setMinimumHeight(260);
-        inputLayout->addWidget(table_);
-        auto *order = new QHBoxLayout;
-        auto *up = new QPushButton("Move up");
-        auto *down = new QPushButton("Move down");
-        order->addWidget(up);
-        order->addWidget(down);
-        order->addStretch();
+        table_->setMinimumHeight(240);
+        inputLayout->addWidget(table_, 1);
+        auto *actions = new QHBoxLayout;
+        auto *addAction = new QPushButton("+ Action");
+        auto *removeAction = new QPushButton("Remove action");
+        auto *up = new QPushButton("Move up"), *down = new QPushButton("Move down");
+        actions->addWidget(addAction);
+        actions->addWidget(removeAction);
+        actions->addWidget(up);
+        actions->addWidget(down);
+        actions->addStretch();
+        inputLayout->addLayout(actions);
+        auto *shortcutPanel = new QWidget;
+        auto *shortcuts = new QHBoxLayout(shortcutPanel);
+        shortcuts->setContentsMargins(0, 0, 0, 0);
+        cycleShortcut_ = new QKeySequenceEdit;
+        cycleShortcut_->setObjectName("cycleShortcut");
+        cycleShortcut_->setMaximumSequenceLength(1);
+        previousShortcut_ = new QKeySequenceEdit;
+        previousShortcut_->setObjectName("previousShortcut");
+        previousShortcut_->setMaximumSequenceLength(1);
+        shortcuts->addWidget(new QLabel("Cycle"));
+        shortcuts->addWidget(cycleShortcut_);
+        shortcuts->addWidget(new QLabel("Previous"));
+        shortcuts->addWidget(previousShortcut_);
+        inputLayout->addWidget(shortcutPanel);
+        results_ = new QPlainTextEdit;
+        results_->setObjectName("switchResults");
+        results_->setReadOnly(true);
+        results_->setMaximumHeight(94);
+        results_->setAccessibleName("Per-monitor switch results");
+        inputLayout->addWidget(results_);
+        auto *switches = new QHBoxLayout;
+        retry_ = new QPushButton("Retry failed monitors");
+        retry_->setObjectName("retryFailed");
+        previous_ = new QPushButton("Previous input");
         cycle_ = new QPushButton("Cycle inputs");
         cycle_->setObjectName("primary");
-        order->addWidget(cycle_);
-        inputLayout->addLayout(order);
-        tabs->addTab(inputs, "Inputs");
+        switches->addWidget(retry_);
+        switches->addStretch();
+        switches->addWidget(previous_);
+        switches->addWidget(cycle_);
+        inputLayout->addLayout(switches);
+        tabs_->addTab(inputs, "Inputs");
         auto *preferences = new QFrame;
         preferences->setObjectName("card");
         auto *form = new QFormLayout(preferences);
-        form->setContentsMargins(20, 24, 20, 24);
-        form->setSpacing(18);
+        form->setContentsMargins(20, 20, 20, 20);
+        form->setSpacing(16);
         appearance_ = new QComboBox;
         appearance_->setObjectName("appearance");
         appearance_->addItem("Follow system", "system");
@@ -727,57 +1487,37 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         notifications_ = new QCheckBox("Show command notifications");
         notifications_->setChecked(config_.notifications);
         form->addRow("Notifications", notifications_);
-        startup_ = new QCheckBox("Launch when I sign in to Windows", preferences);
+        startup_ = new QCheckBox("Launch when I sign in");
         startup_->setObjectName("startup");
         startup_->setChecked(config_.startup);
-        cycleShortcut_ =
-            new QKeySequenceEdit(QKeySequence::fromString(config_.cycleShortcut, QKeySequence::PortableText));
-        cycleShortcut_->setParent(preferences);
-        cycleShortcut_->setMaximumSequenceLength(1);
-        previousShortcut_ = new QKeySequenceEdit(
-            QKeySequence::fromString(config_.previousShortcut, QKeySequence::PortableText), preferences);
-        previousShortcut_->setMaximumSequenceLength(1);
-        previousShortcut_->setObjectName("previousShortcut");
-        globalShortcuts_ = new QCheckBox("Enable global shortcuts while the app is running", preferences);
+        form->addRow("Startup", startup_);
+        globalShortcuts_ = new QCheckBox("Enable global shortcuts while the app is running");
         globalShortcuts_->setObjectName("globalShortcuts");
         globalShortcuts_->setChecked(config_.globalShortcuts);
 #ifdef Q_OS_WIN
         globalShortcuts_->hide();
-        form->addRow("Startup", startup_);
-        form->addRow("Cycle shortcut", cycleShortcut_);
-        form->addRow("Previous input", previousShortcut_);
 #else
-        startup_->setText("Launch when I sign in");
-        form->addRow("Startup", startup_);
-        if (kdeAvailable_)
-        {
+        if (kdeAvailable_ || preview_)
             form->addRow("Global shortcuts", globalShortcuts_);
-            form->addRow("Cycle shortcut", cycleShortcut_);
-            form->addRow("Previous input", previousShortcut_);
-            cycleShortcut_->setEnabled(config_.globalShortcuts);
-            previousShortcut_->setEnabled(config_.globalShortcuts);
-            auto *help =
-                new QLabel("Enable shortcuts, record combinations on Inputs, then save. Plasma handles them "
-                           "even when this window is hidden. Existing shortcut conflicts are reported.");
+        else
+            globalShortcuts_->hide();
+#endif
+        auto *shortcutHelp =
+            new QLabel("Shortcuts belong to named profiles and work whichever tab is open. Edit them on "
+                       "Inputs. On KDE, assignments are linked with Plasma’s shortcut manager.");
+        shortcutHelp->setWordWrap(true);
+        form->addRow(shortcutHelp);
+#ifndef Q_OS_WIN
+        if (!kdeAvailable_ && !preview_)
+        {
+            shortcutPanel->hide();
+            auto *help = new QLabel("Global shortcuts require KDE Plasma with KGlobalAccel. Other desktops "
+                                    "can bind the existing single-monitor CLI in their shortcut settings.");
             help->setWordWrap(true);
             form->addRow(help);
         }
-        else
-        {
-            globalShortcuts_->hide();
-            cycleShortcut_->hide();
-            previousShortcut_->hide();
-            table_->hideColumn(3);
-            auto *help =
-                new QLabel("Native global shortcuts require KDE Plasma and the optional KGlobalAccel "
-                           "integration. Otherwise bind the CLI in desktop keyboard settings.");
-            help->setWordWrap(true);
-            form->addRow("Linux shortcuts", help);
-        }
 #endif
-        auto *license =
-            new QLabel("LG Input Switch · AGPL-3.0-or-later · "
-                       "<a href=\"https://github.com/phillip9933/LGInputSwitch\">Source and license</a>");
+        auto *license = new QLabel;
         license->setObjectName("license");
         license->setOpenExternalLinks(true);
         license->setWordWrap(true);
@@ -785,42 +1525,43 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *aboutQt = new QPushButton("About Qt");
         connect(aboutQt, &QPushButton::clicked, this, [this] { QMessageBox::aboutQt(this); });
         form->addRow(aboutQt);
-        tabs->addTab(preferences, "Preferences");
+        tabs_->addTab(preferences, "Preferences");
         auto *advanced = new QFrame;
         advanced->setObjectName("card");
         auto *advancedForm = new QFormLayout(advanced);
-        advancedForm->setContentsMargins(20, 24, 20, 24);
-        advancedForm->setSpacing(18);
-        source_ = new QLineEdit(config_.source);
-        source_->setMaximumWidth(160);
-        advancedForm->addRow("I²C source address", source_);
+        advancedForm->setContentsMargins(20, 20, 20, 20);
+        advancedForm->setSpacing(16);
         debounce_ = new QSpinBox;
         debounce_->setRange(0, 10000);
         debounce_->setSuffix(" ms");
         debounce_->setValue(config_.debounce);
         advancedForm->addRow("Shortcut debounce", debounce_);
-        auto *codes = new QCheckBox("Show editable input codes on the Inputs tab");
-        advancedForm->addRow("Input mapping", codes);
-        table_->hideColumn(2);
-        auto *explanation = new QLabel("LG input codes vary by monitor. Keep known-working values. A command "
-                                       "can be sent successfully without the monitor confirming a switch.");
+        codes_ = new QCheckBox("Show codes beside input names");
+        advancedForm->addRow("Input mapping", codes_);
+        auto *manage = new QPushButton("Manage saved monitors…");
+        connect(manage, &QPushButton::clicked, this, [this] { manageMonitors(); });
+        advancedForm->addRow("Monitor library", manage);
+        auto *explanation =
+            new QLabel("Use Edit next to a monitor to change its source address or input codes. All profiles "
+                       "share that monitor’s mapping. Duplicate or missing identities need explicit "
+                       "connection selection. Commands are sent in sequence; exact simultaneous switching "
+                       "and physical confirmation are not guaranteed.");
         explanation->setWordWrap(true);
         advancedForm->addRow(explanation);
-        tabs->addTab(advanced, "Advanced");
+        tabs_->addTab(advanced, "Advanced");
         auto *diagnosticsTab = new QFrame;
         diagnosticsTab->setObjectName("card");
         auto *diagnosticsLayout = new QVBoxLayout(diagnosticsTab);
-        diagnosticsLayout->setContentsMargins(18, 18, 18, 18);
+        diagnosticsLayout->setContentsMargins(16, 16, 16, 16);
         auto *diagnosticsHint = new QLabel(
-            "Having trouble switching? Create a report with system details, advertised controls and input "
-            "values, and read-only monitor checks. No settings are changed or uploaded. Review before sharing.");
+            "Create a local report for all monitors assigned to this profile, including per-monitor command "
+            "results and advertised inputs. No settings are changed or uploaded. Review before sharing.");
         diagnosticsHint->setWordWrap(true);
         diagnosticsLayout->addWidget(diagnosticsHint);
         diagnosticReport_ = new QPlainTextEdit;
         diagnosticReport_->setObjectName("diagnosticReport");
-        diagnosticReport_->setAccessibleName("Diagnostic report");
         diagnosticReport_->setReadOnly(true);
-        diagnosticReport_->setPlaceholderText("Create a report to see diagnostic information here.");
+        diagnosticReport_->setAccessibleName("Diagnostic report");
         diagnosticsLayout->addWidget(diagnosticReport_, 1);
         auto *diagnosticButtons = new QHBoxLayout;
         diagnosticRun_ = new QPushButton("Create report");
@@ -834,25 +1575,12 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         diagnosticButtons->addWidget(diagnosticCopy_);
         diagnosticButtons->addWidget(diagnosticSave_);
         diagnosticsLayout->addLayout(diagnosticButtons);
-        connect(diagnosticRun_, &QPushButton::clicked, this, [this] { diagnostics(); });
-        connect(diagnosticCopy_, &QPushButton::clicked, this, [this] {
-            QApplication::clipboard()->setText(diagnosticReport_->toPlainText());
-            message("Report copied. Paste it into your support request when ready.");
-        });
-        connect(diagnosticSave_, &QPushButton::clicked, this, [this] {
-            const auto path = QFileDialog::getSaveFileName(this, "Save diagnostic report", "lginputswitch-diagnostics.json",
-                                                         "JSON report (*.json)");
-            if (path.isEmpty()) return;
-            QString error;
-            message(SaveDesktopDiagnostics(path, diagnosticReport_->toPlainText(), error)
-                        ? "Diagnostic report saved." : "Could not save the report: " + error);
-        });
-        tabs->addTab(diagnosticsTab, "Diagnostics");
+        tabs_->addTab(diagnosticsTab, "Diagnostics");
         layout->addWidget(controls_, 1);
         status_ = new QLabel;
         status_->setObjectName("status");
         status_->setWordWrap(true);
-        status_->setFixedHeight(48);
+        status_->setMinimumHeight(42);
         layout->addWidget(status_);
         auto *footer = new QHBoxLayout;
         auto *close = new QPushButton("Hide to tray");
@@ -861,6 +1589,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         save_ = new QPushButton("Save settings");
         save_->setAccessibleName("Save settings");
         save_->setObjectName("primary");
+        save_->setEnabled(!configurationBlocked_);
         footer->addWidget(save_);
         layout->addLayout(footer);
         tray_ = new QSystemTrayIcon(this);
@@ -875,60 +1604,139 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             if (tray_->isVisible() && QSystemTrayIcon::isSystemTrayAvailable())
                 hide();
             else
-                message("This desktop has no system tray. Keep this window open, or use Quit from the window "
-                        "menu.");
+                message("This desktop has no system tray. Keep the window open or close it to quit.");
         });
-        connect(save_, &QPushButton::clicked, this, [this] { save(); });
+        rebuildTabs();
+        populateProfile();
+        connect(profileTabs_, &QTabBar::currentChanged, this, [this](int index) {
+            if (populating_ || index < 0)
+                return;
+            captureDraft();
+            activeId_ = profileTabs_->tabData(index).toString();
+            populateProfile();
+        });
+        connect(addProfile_, &QPushButton::clicked, this, [this] { addProfile(); });
+        connect(renameProfile_, &QPushButton::clicked, this, [this] {
+            captureDraft();
+            bool ok = false;
+            const auto name = QInputDialog::getText(this, "Rename profile", "Profile name", QLineEdit::Normal,
+                                                    active().name, &ok)
+                                  .trimmed();
+            if (!ok || name.isEmpty())
+                return;
+            for (const auto &p : draft_.profiles)
+                if (p.id != activeId_ && p.name == name)
+                {
+                    message("Choose a unique profile name.");
+                    return;
+                }
+            active().name = name;
+            rebuildTabs();
+            dirty();
+        });
+        connect(removeProfile_, &QPushButton::clicked, this, [this] {
+            if (draft_.profiles.size() <= 1)
+                return;
+            if (QMessageBox::question(this, "Remove profile",
+                                      "Remove “" + active().name +
+                                          "”? Its saved monitors remain available.") != QMessageBox::Yes)
+                return;
+            for (int i = 0; i < draft_.profiles.size(); ++i)
+                if (draft_.profiles[i].id == activeId_)
+                {
+                    draft_.profiles.removeAt(i);
+                    break;
+                }
+            activeId_ = draft_.profiles.front().id;
+            rebuildTabs();
+            populateProfile();
+            dirty();
+        });
+        connect(addMonitor_, &QPushButton::clicked, this, [this] { addMonitor(); });
         connect(refresh_, &QPushButton::clicked, this, [this] { refresh(); });
-        connect(cycle_, &QPushButton::clicked, this, [this] { sendInput(-1); });
-        connect(codes, &QCheckBox::toggled, this, [this](bool show) { table_->setColumnHidden(2, !show); });
+        connect(save_, &QPushButton::clicked, this, [this] { save(); });
+        connect(cycle_, &QPushButton::clicked, this, [this] { sendInput(activeId_, "cycle"); });
+        connect(previous_, &QPushButton::clicked, this, [this] { sendInput(activeId_, "previous"); });
+        connect(retry_, &QPushButton::clicked, this, [this] { sendInput(activeId_, {}, true); });
+        connect(addAction, &QPushButton::clicked, this, [this] {
+            captureDraft();
+            if (active().actions.size() >= 64)
+                return;
+            ProfileAction a;
+            a.id = NewDesktopId();
+            a.name = "New action";
+            for (const auto &id : active().monitors)
+                a.inputs[id] = {};
+            active().actions.push_back(a);
+            populateProfile();
+            table_->selectRow(table_->rowCount() - 1);
+            dirty();
+        });
+        connect(removeAction, &QPushButton::clicked, this, [this] {
+            captureDraft();
+            const int row = table_->currentRow();
+            if (row < 0 || active().actions.size() <= 1)
+                return;
+            active().actions.removeAt(row);
+            populateProfile();
+            dirty();
+        });
         auto move = [this](int delta) {
-            int row = table_->currentRow();
-            int next = row + delta;
+            const int row = table_->currentRow(), next = row + delta;
             if (row < 0 || next < 0 || next >= table_->rowCount())
                 return;
-            config_.inputs = collect().inputs;
-            config_.inputs.swapItemsAt(row, next);
-            populate();
+            captureDraft();
+            active().actions.swapItemsAt(row, next);
+            populateProfile();
             table_->selectRow(next);
             dirty();
         };
         connect(up, &QPushButton::clicked, this, [move] { move(-1); });
         connect(down, &QPushButton::clicked, this, [move] { move(1); });
-        populate();
         connect(table_, &QTableWidget::itemChanged, this, [this] { dirty(); });
-        connect(monitors_, &QComboBox::currentIndexChanged, this, [this] {
-            dirty();
-            rebuildMenu();
+        connect(codes_, &QCheckBox::toggled, this, [this] {
+            captureDraft();
+            populateProfile();
         });
         connect(appearance_, &QComboBox::currentIndexChanged, this, [this] {
             theme();
             dirty();
         });
         connect(qApp->styleHints(), &QStyleHints::colorSchemeChanged, this, [this] { theme(); });
-        connect(source_, &QLineEdit::textChanged, this, [this] { dirty(); });
         connect(debounce_, &QSpinBox::valueChanged, this, [this] { dirty(); });
         connect(notifications_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(startup_, &QCheckBox::toggled, this, [this] { dirty(); });
         connect(cycleShortcut_, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
         connect(previousShortcut_, &QKeySequenceEdit::keySequenceChanged, this, [this] { dirty(); });
-        connect(globalShortcuts_, &QCheckBox::toggled, this, [this](bool enabled) {
-#ifndef Q_OS_WIN
-            cycleShortcut_->setEnabled(enabled && kdeAvailable_);
-            previousShortcut_->setEnabled(enabled && kdeAvailable_);
-            for (int i = 0; i < table_->rowCount(); ++i)
-                table_->cellWidget(i, 3)->setEnabled(enabled && kdeAvailable_);
-#endif
+        connect(globalShortcuts_, &QCheckBox::toggled, this, [this] {
+            captureDraft();
+            populateProfile();
             dirty();
         });
-        connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *current) {
+        connect(diagnosticRun_, &QPushButton::clicked, this, [this] { diagnostics(); });
+        connect(diagnosticCopy_, &QPushButton::clicked, this, [this] {
+            QApplication::clipboard()->setText(diagnosticReport_->toPlainText());
+            message("Report copied. Paste it into your support request when ready.");
+        });
+        connect(diagnosticSave_, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getSaveFileName(
+                this, "Save diagnostic report", "lginputswitch-diagnostics.json", "JSON report (*.json)");
+            if (path.isEmpty())
+                return;
+            QString error;
+            message(SaveDesktopDiagnostics(path, diagnosticReport_->toPlainText(), error)
+                        ? "Diagnostic report saved."
+                        : "Could not save report: " + error);
+        });
+        auto recordingChanged = [this](QWidget *current) {
             bool capture = false;
-            for (auto *widget = current; widget; widget = widget->parentWidget())
-                if (qobject_cast<QKeySequenceEdit *>(widget))
-                {
-                    capture = true;
-                    break;
-                }
+            if (qApp->applicationState() == Qt::ApplicationActive)
+                for (auto *w = current; w; w = w->parentWidget())
+                    if (qobject_cast<QKeySequenceEdit *>(w))
+                    {
+                        capture = true;
+                        break;
+                    }
             if (capture == recordingShortcut_)
                 return;
             recordingShortcut_ = capture;
@@ -939,30 +1747,29 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                     UnregisterHotKey(nullptr, item.first);
                 hotkeys_.clear();
 #else
-                if(!preview_)kdeShortcuts_.clear();
+                if (!preview_)
+                    kdeShortcuts_.clear();
 #endif
             }
             else if (!preview_)
                 registerHotkeys();
-        });
+        };
+        connect(qApp, &QApplication::focusChanged, this,
+                [recordingChanged](QWidget *, QWidget *current) { recordingChanged(current); });
+        connect(qApp, &QGuiApplication::applicationStateChanged, this,
+                [recordingChanged](Qt::ApplicationState) { recordingChanged(QApplication::focusWidget()); });
+
         qApp->installNativeEventFilter(this);
         theme();
-        rebuildMenu();
-        if (!preview_)
+        updateActions();
+        if (!preview_ && !configurationBlocked_)
         {
             tray_->show();
             registerHotkeys();
             refresh();
         }
-        else
-        {
-            detected_.push_back({"LG UltraGear · Design preview", 0, 1, true});
-            monitors_->addItem(detected_[0].label);
-            monitors_->setCurrentIndex(0);
-            dirty_ = false;
-            save_->setText("Save settings");
+        else if (preview_)
             message("Design preview · no settings are saved and no hardware commands are sent.");
-        }
         if (!warning.isEmpty())
             QTimer::singleShot(100, this, [this, warning] { message(warning); });
     }
@@ -982,24 +1789,23 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         QDir().mkpath(directory);
         if (preview_)
         {
-            const DiagnosticSnapshot snapshot{collect(), true, false, {}};
-            diagnosticReport_->setPlainText(FormatDesktopDiagnostics(snapshot,
-                CollectDesktopDiagnostics(snapshot, true), true));
+            const auto snapshot = diagnosticSnapshot();
+            diagnosticReport_->setPlainText(
+                FormatDesktopDiagnostics(snapshot, CollectDesktopDiagnostics(snapshot, true), true));
             diagnosticCopy_->setEnabled(true);
             diagnosticSave_->setEnabled(true);
         }
-        auto *tabs = findChild<QTabWidget *>();
         for (const auto &mode : {QString("light"), QString("dark")})
         {
             appearance_->setCurrentIndex(appearance_->findData(mode));
             dirty_ = false;
             save_->setText("Save settings");
-            rebuildMenu();
-            for (int tab = 0; tab < tabs->count(); ++tab)
+            updateActions();
+            for (int tab = 0; tab < tabs_->count(); ++tab)
             {
-                tabs->setCurrentIndex(tab);
+                tabs_->setCurrentIndex(tab);
                 qApp->processEvents();
-                const auto suffix = tab == 0 ? QString{} : "-" + tabs->tabText(tab).toLower();
+                const auto suffix = tab == 0 ? QString{} : "-" + tabs_->tabText(tab).toLower();
                 grab().save(directory + "/desktop-" + mode + suffix + ".png");
             }
             menu_->popup(mapToGlobal(QPoint(100, 100)));
@@ -1007,10 +1813,24 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             menu_->grab().save(directory + "/tray-" + mode + ".png");
             menu_->hide();
         }
-        tabs->setCurrentIndex(0);
+        tabs_->setCurrentIndex(0);
+        if (preview_)
+        {
+            activeId_ = "preview-group";
+            rebuildTabs();
+            populateProfile();
+            for (const auto &mode : {QString("light"), QString("dark")})
+            {
+                appearance_->setCurrentIndex(appearance_->findData(mode));
+                dirty_ = false;
+                save_->setText("Save settings");
+                updateActions();
+                qApp->processEvents();
+                grab().save(directory + "/profiles-" + mode + ".png");
+            }
+        }
     }
 };
-
 #ifndef LG_DESKTOP_TEST
 int main(int argc, char **argv)
 {

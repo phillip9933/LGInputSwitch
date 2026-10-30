@@ -92,3 +92,19 @@ Record OS, GPU and driver, monitor and firmware, connection/dock, source/input
 codes and observed behavior. Start with AMD and #5's known-working LG commands,
 then validate Intel and NVIDIA independently. Verify permission errors and
 disconnect/reconnect without sending to an unintended monitor.
+
+## Standard monitor input switching (development checkout)
+
+The next update adds `--method standard` for monitors implementing standard VCP
+Input Source (0x60), such as compatible Dell models:
+
+```
+lginputswitch switch --bus 3 --method standard --input 0x11 --dry-run
+```
+
+Review the preview and the monitor’s advertised input values before omitting
+`--dry-run`. The standard method uses source 0x51 and omits the LG source override.
+Without `--method`, the existing LG F4/source-50 behavior is preserved. Custom
+standard source overrides other than 0x51 are rejected. Both methods send without
+readback because switching can disconnect this host. Input values are model
+dependent; no automatic fallback between methods is attempted.

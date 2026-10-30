@@ -42,6 +42,24 @@ independently disable an enabled startup entry. Disable startup in the app befor
 removing its folder; uninstalling is otherwise just quitting and removing the
 extracted folder. Keep your backed-up configuration if you want to retain it.
 
+## Development checkout: monitor profiles
+
+The next update adds profiles to the modern frontend. Existing 1.2 config.json
+and per-user preferences are imported into one Main monitor profile. Confirm the
+connection and save. The new workspace is stored atomically in
+**desktop-profiles.json beside LGInputSwitchDesktop.exe**; keep this file when
+moving/upgrading the modern app. The original config.json is preserved for legacy
+rollback. The legacy frontend does not support profiles or grouped commands. Per-monitor
+method selection also adds standard DDC/CI input-source commands (0x60), including
+for compatible Dell models, through the existing AMD backend. This does not remove
+the Windows AMD requirement.
+
+Use + Profile for an independent set of actions, + Monitor to assign displays,
+and each monitor's Edit menu to maintain its shared input-code mapping. One action
+can select a different input on each monitor. Shortcuts and tray entries name the
+profile; partial failures have per-monitor results and a failed-only retry.
+See [profile setup](desktop-ui.md#monitor-profiles-development-checkout).
+
 ## Licenses, corresponding source and replacement libraries
 
 Project code is AGPL-3.0-or-later; full terms are in LICENSE.md. MIT dependency

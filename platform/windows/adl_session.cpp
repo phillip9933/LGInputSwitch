@@ -65,6 +65,8 @@ bool InitializeAdl()
                           Resolve(state.library, api.displays, "ADL_Display_DisplayInfo_Get") &&
                           Resolve(state.library, api.writeBlock, "ADL_Display_DDCBlockAccess_Get");
     if (complete)
+        Resolve(state.library, api.edid, "ADL_Display_EdidData_Get");
+    if (complete)
         state.initialized = api.create(AllocateDriverMemory, 1) == ADL_OK;
     if (!state.initialized)
         state.reset();

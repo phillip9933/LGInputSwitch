@@ -15,12 +15,14 @@ static std::string Hex(unsigned int value) {
 }
 
 std::vector<std::string> DdcutilTransport::Arguments(const lg::InputCommand& command) const {
-    if (!lg::ValidCommand(command) || command.featureCode != 0xf4 ||
+    if (!lg::ValidCommand(command) || (command.featureCode != 0xf4 && !(command.featureCode == 0x60 && command.sourceAddress == 0x51)) ||
         (selector_ != "--display" && selector_ != "--bus") ||
         number_ > static_cast<unsigned int>(std::numeric_limits<int>::max()) ||
         (selector_ == "--display" && number_ == 0)) return {};
-    return {"ddcutil", selector_, std::to_string(number_), "setvcp", Hex(command.featureCode),
-        Hex(command.value), "--i2c-source-addr=" + Hex(command.sourceAddress), "--noverify"};
+    std::vector<std::string> arguments{"ddcutil", selector_, std::to_string(number_), "setvcp", Hex(command.featureCode), Hex(command.value)};
+    if (command.featureCode == 0xf4) arguments.push_back("--i2c-source-addr=" + Hex(command.sourceAddress));
+    arguments.push_back("--noverify");
+    return arguments;
 }
 
 lg::SwitchResult DdcutilTransport::Send(const lg::InputCommand& command) {

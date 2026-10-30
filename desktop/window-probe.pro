@@ -5,3 +5,5 @@ INCLUDEPATH += /usr/include/KF6/KGlobalAccel
 LIBS += -lKF6GlobalAccel
 TARGET = kde_window_probe
 SOURCES += ../tests/kde_window_probe.cpp platform.cpp ../core/input_switcher.cpp ../platform/linux/ddcutil_backend.cpp
+
+SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp

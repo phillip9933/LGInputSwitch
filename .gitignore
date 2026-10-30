@@ -18,3 +18,5 @@ config.json
 build*/
 
 __pycache__/
+
+desktop-profiles.json

@@ -47,6 +47,21 @@ class LinuxCliTests(unittest.TestCase):
                  "--i2c-source-addr=0x50", "--noverify"])
             self.assertIn("not verified", result.stdout)
 
+    def test_standard_switch_and_dry_run(self):
+        expected = ["--bus", "3", "setvcp", "0x60", "0x11", "--noverify"]
+        result = self.run_cli("switch", "--bus", "3", "--method", "standard", "--input", "0x11")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.log.read_text())[1:], expected)
+        self.log.unlink()
+        result = self.run_cli("switch", "--bus", "3", "--input", "0x11", "--method", "standard", "--dry-run", PATH="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), ["ddcutil", *expected])
+        self.assertFalse(self.log.exists())
+        for extra in (("--source", "0x50"), ("--method", "invalid"), ("--method", "standard")):
+            result = self.run_cli("switch", "--bus", "3", "--input", "0x11", "--method", "standard", *extra)
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(self.log.exists())
+
     def test_bus_zero_and_decimal_values(self):
         result = self.run_cli("switch", "--bus", "0", "--input", "144", "--source", "80")
         self.assertEqual(result.returncode, 0, result.stderr)

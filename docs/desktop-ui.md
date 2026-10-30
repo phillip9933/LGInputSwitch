@@ -13,51 +13,135 @@ accent, clearer hierarchy, rounded cards and comfortable input rows work in both
 light and dark modes. The monitor glyph is drawn at multiple resolutions, so tray
 and window icons scale without raster stretching.
 
-## Behavior
+## Monitor profiles (development checkout)
 
-- Inputs: enable, name and reorder inputs; direct and cycle actions. Editable
-  input codes are revealed from Advanced rather than dominating setup.
-- Preferences: Follow system (default), Light or Dark, plus notifications.
-  Windows adds shortcut recording, cycle shortcut and startup settings. Appearance
-  changes preview immediately and persist when settings are saved.
-- Advanced: source address, debounce and editable input mapping.
-- Diagnostics: create, review, copy or save a local JSON support report. Reports
-  include OS/Qt/app versions and build revision, selected target, normalized input codes, unsaved-edit
-  status and the last command's target/result, advertised VCP controls/MCCS version,
-  and any advertised standard/LG input values. Custom labels, shortcuts, raw EDID
-  and capability strings, serial numbers, user names and personal file paths are
-  omitted. Nothing is uploaded.
-- Tray: open the app by left/double click, right-click for enabled inputs, cycle,
-  open and quit. Closing hides only when a tray is available; without one the GUI
-  remains usable and closing quits. A second instance shows where to find the app.
-- Discovery and writes run on one serialized worker, keeping the GUI responsive.
-  Writes require an explicitly selected/discovered, saved target. Editing settings
-  disables tray switching until saved. Reconnect/refresh never silently selects a
-  different monitor. Failures stay visible; success says command sent, not verified.
-- Windows hotkeys are released while recording a shortcut so recording cannot
-  accidentally switch the monitor. Registration conflicts are shown in the GUI.
+This section describes the current development checkout. The published 1.2.0
+release has the earlier single-monitor editor; the legacy Win32 frontend and
+standalone Linux CLI retain their existing single-target behavior.
 
-On Windows, the new executable reads and saves the existing config.json beside
-it. Preserve that file when moving a release executable. Existing enabled
-custom codes/order and additional configured targets are retained; disabled rows
-are retained in desktop preferences so they can be re-enabled. Run one Windows
-frontend at a time to avoid duplicate startup/hotkey ownership.
+The **Monitors & profiles** card contains named tabs. **+ Profile** creates an
+independent action list using an existing saved monitor, without copying its
+shortcuts. Rename/remove buttons manage the selected tab. Switching tabs keeps
+unsaved form edits; **Save settings** saves the entire workspace. Unsaved changes
+block all switching, including native keys and tray actions, until saved.
 
-Linux desktop preferences use Qt's per-user config location, separately from the
-Windows JSON and CLI. There is no automatic config migration. On KDE Plasma, optional KGlobalAccel support lets you enable global shortcuts in
-Preferences, record combinations on Inputs and save. This works while the app is
-running, including with its window hidden. Shortcut registration is off until
-you enable it. Existing shortcuts belonging to other apps or manual Plasma
-commands are reported as conflicts and are never stolen. Active shortcuts are suspended while recording and deactivated on exit; their
-Plasma assignments remain registered. LG Input Switch appears under Applications
-in Plasma Shortcuts when its desktop launcher is installed. Both editors use the
-same assignments: changes in Plasma update the app and its saved preferences,
-and app changes update Plasma. Unsaved app edits remain drafts until saved.
+1. Select the connection for the first monitor. Use **Edit → Edit monitor &
+   inputs** to name it and review its input names/codes and source address.
+2. Use **+ Monitor** to attach another saved monitor or a newly detected one.
+   A saved monitor has one input mapping shared by every profile using it.
+3. Name actions such as **Linux PC** and **Windows PC**. Choose one input for
+   **every** assigned monitor in each row. New group members have no guessed
+   input assignment; select the mappings before saving.
+4. Enable the actions you want, reorder them with Move up/down, and optionally
+   record direct, cycle and previous shortcuts. **+ Action** adds a custom action.
+5. Save, then use a row's **Switch**, **Cycle inputs**, **Previous input**, a
+   profile's tray submenu or its shortcut. The selected GUI tab does not change
+   which profile a shortcut controls.
 
-Other desktops (or builds without KGlobalAccel) retain the desktop-configured CLI
-fallback. Linux offers opt-in per-user desktop autostart; see [installation and upgrades](linux-install.md). GNOME requires tray support via an appropriate
-extension; desktops without a tray can use the window. Tray-host and Wayland
-integration require desktop-specific manual testing.
+For example, a Linux PC action can send DisplayPort on the main monitor and
+HDMI on the side monitor. Commands run on the serialized background worker, so
+one action dispatches all its commands while the GUI stays responsive. Exact
+simultaneity is not guaranteed. A missing/failed monitor does not stop subsequent
+members. Per-monitor results show command acceptance or failure; **Retry failed
+monitors** retries only the failed members. Refresh can update connection status
+before retrying. A sent command does not confirm a physical input change.
+
+Cycle follows enabled action order. Previous remembers complete accepted actions
+in this session, never the display's initial physical input. Partial attempts do
+not advance history: Previous can restore the last completely sent action.
+A successful retry completes the action and updates history once. Sending to a
+shared monitor from another profile invalidates the affected profile's old
+history/retry so it cannot silently reuse stale group state. Changes to monitor
+mappings, routes or action membership invalidate affected session state; names
+and shortcut changes retain history. History is not persisted across restarts.
+
+Connected monitors are matched by unique local EDID fingerprints where available
+(Linux can also use the manufacturer/model/serial information from ddcutil).
+Native display/bus numbers are re-enumerated before each member’s command,
+including after an earlier group command changes the connected topology. Duplicate/missing
+fingerprints and replacements require explicit connection selection. For a
+monitor without a unique fingerprint, the confirmation lasts only for this app
+session; a changed route/model/fingerprint requires selecting it again. Reconnect
+never silently substitutes another display. Identity hashes and raw serial/EDID
+are not exported in support reports.
+
+The monitor library is available from **Advanced → Manage saved monitors**. Edit
+there or beside an assigned monitor to update its shared mapping. Inputs used
+by any action cannot be deleted until those actions are remapped. Removing a
+monitor from one profile keeps the library definition; only unused definitions
+can be deleted. At least one profile, monitor per profile and enabled action
+must remain. Configuration limits are 16 saved monitors, 32 profiles and 64
+actions/inputs per profile/monitor.
+
+Appearance (Follow system/Light/Dark), notifications, startup and debounce remain
+app-wide. Advanced can reveal input codes beside the input names. Closing hides
+to the tray when available; without a tray it quits after the unsaved-edits prompt.
+
+### Standard switching and other monitor brands
+
+Each saved monitor has its own **Switching method**, selected when adding it or
+in **Edit monitor & inputs**. **Standard DDC/CI (0x60)** supports Dell and other
+monitors that implement standard Input Source writes. It uses the standard 0x51
+source. **LG alternate (0xF4)** retains the existing configurable source address,
+normally 0x50. Migrated setups keep the LG method; new monitor definitions default
+to Standard. Groups can freely mix the two methods.
+
+Standard presets include DisplayPort 1/2 (0x0f/0x10) and HDMI 1/2 (0x11/0x12).
+**Load method presets** is an explicit replacement; matching input names keep
+IDs, and unmatched profile mappings must be selected again before saving. Method
+selection alone never silently translates custom codes. On Linux, **Read
+advertised inputs** performs bounded read-only queries of the selected monitor
+and appends advertised values for the chosen method without removing existing
+inputs. On Windows, review the built-in diagnostics and enter the appropriate
+values manually: native diagnostic identifiers are not assumed to match AMD
+indices. USB-C/vendor-specific inputs require the monitor's own advertised or
+known-working values; no universal USB-C code is guessed.
+
+Standard switching uses the existing platform transports: ddcutil on Linux and
+AMD ADL on Windows. It does not add Intel/NVIDIA Windows GPU backends. DDC/CI must
+be enabled in the monitor, and some models/cables/docks/firmware do not implement
+input switching or will not accept it while inactive. An advertised code is
+useful evidence, not a compatibility guarantee. No automatic fallback sends both
+standard and LG commands. Protocol background: [ddcutil Input Source example](https://www.ddcutil.com/getvcp_known_u3011_output/).
+
+### Settings and migration
+
+Existing desktop settings are read into one **Main monitor** profile, retaining
+custom codes, input order, disabled rows, direct/cycle/previous shortcuts and app
+preferences. No hardware commands are sent by migration. Confirm the connection
+and save to store the new schema. Malformed/newer profile files block saving and
+switching so a fallback cannot overwrite them; back up and repair/remove that
+configuration before restarting. Migration leaves the original 1.2 settings intact.
+
+On Windows, the modern app imports the existing `config.json` and Qt desktop
+preferences once, then saves its complete workspace in **desktop-profiles.json**
+beside the executable, using an atomic file replacement. Back up/copy both JSON
+files when moving the app. Additional legacy targets remain intact in the original
+config.json. The legacy frontend does not understand profiles; avoid running both
+frontends together because startup/key ownership still overlaps.
+
+On Linux, the workspace is the versioned `profilesV2` entry in the existing
+per-user Qt settings file, normally
+`~/.config/LGInputSwitch/LGInputSwitchDesktop.conf`. The standalone CLI does not
+read these profiles. Plasma Autostart changes are respected at next launch.
+
+### Shortcuts and tray
+
+Windows uses RegisterHotKey; KDE Plasma uses the optional KGlobalAccel integration
+on X11 and Wayland. Each enabled action, Cycle inputs and Previous input is named
+under its profile in the tray and Plasma shortcut catalogue. Both editors use
+the same saved assignments. Cross-profile duplicates are rejected, and keys
+belonging to other applications or manual Plasma commands are never stolen.
+Initial migration retains the existing Plasma action IDs; renaming/reordering an
+action or profile keeps its stable ID and shortcut assignment. Removed/disabled
+actions are pruned from this component after a successful update. Native keys
+are suspended during shortcut recording and restored on leaving capture/hiding
+the app. Existing shortcuts on other desktops remain available through their
+single-monitor CLI bindings; native profile shortcuts require KDE on Linux.
+
+External Plasma edits update the saved profile without writing unrelated dirty
+form drafts. Saving an explicitly edited app draft applies that draft. Preview
+mode never registers keys, discovers monitors, writes settings or sends commands.
 
 ## Built-in diagnostics
 
@@ -65,13 +149,18 @@ Open **Diagnostics → Create report** after a failed switch, review the report,
 then use **Copy report** or **Save report** to attach it to a support request.
 There is no need to save unfinished settings before generating a report: the
 report identifies unsaved edits, and records the last command separately with
-the target and codes actually used at that time.
+the targets and codes actually used at that time. Development reports include
+all monitors assigned to the selected profile, with separate read results and
+normalized input mappings. Profile/monitor/action labels, IDs and local identity
+hashes are omitted. Windows probes still enumerate desktop displays independently
+of AMD target indices; no unverified mapping between those APIs is asserted.
 
 Diagnostics send no input-switching commands, change no settings and request no
 elevation. They read standard brightness (`0x10`) and input (`0x60`) values, plus
 the monitor's advertised capabilities.
-On Linux, the existing ddcutil dependency reads the currently selected display/bus;
-without a selected monitor, those reads are skipped. Only recognized numeric VCP
+On Linux, the existing ddcutil dependency reads each explicitly resolved profile
+monitor's display/bus; reads for unresolved members are skipped. Each member's
+read/capability query has the same timeout bounds, so large groups can take longer. Only recognized numeric VCP
 results and parsed capability fields are exported, never raw ddcutil output. VCP
 reads time out after five seconds and the capability request after ten seconds.
 On Windows, system-provided Dxva2 APIs query up to eight desktop displays and
@@ -184,28 +273,25 @@ were tested against the actual CachyOS/Plasma Wayland session using temporary
 actions with no monitor callbacks. The maintainer subsequently confirmed physical shortcut activation and the linked Plasma application catalogue work on CachyOS/KDE Wayland.
 The probe source is tests/kde_shortcut_probe.cpp.
 
-## Linked shortcut action catalogue
+## Profile implementation and regression coverage
 
-The native component `lginputswitch` resolves to the installed `lginputswitch.desktop` launcher, with a catalogue of:
-Cycle inputs, Previous input, and Switch to each enabled input. Actions with no
-key assigned remain visible for configuration. Disabling/renaming inputs removes
-obsolete actions when the active catalogue is refreshed. The earlier manually
-created command is separate and is not deleted automatically.
+`desktop/profiles.*` owns versioned persistence, migration, validation, identity
+resolution, per-monitor dispatch and per-profile session history. `platform.*`
+retains individual native target transports. The shared Qt editor, tray and
+native shortcut callbacks all dispatch saved profile/action IDs. Discovery and
+commands run on one worker; the desktop ddcutil write path has a 10-second process
+timeout so a hung child does not indefinitely block later members. AMD's optional
+[EDID read API](https://gpuopen-librariesandsdks.github.io/adl/group__I2CDDCEDIDAPI.html)
+provides local display fingerprints without introducing another runtime library.
+Its absence does not prevent explicit session selection or switching.
 
-Previous input tracks accepted commands in the current session. After selecting
-DP and then USB-C through the app, Previous selects DP; pressing it again selects
-USB-C. Re-selecting the current input and failed writes do not replace history.
-History resets when the target/source changes; the app never guesses the initial
-physical input or sends readback probes. It reports when no previous input is
-known. The same previous-input action is available to Windows desktop shortcuts.
-
-The native probe uses a separate configuration process to verify Plasma-to-app
-change signals, persistence/reload, app-to-Plasma writes and conflict handling.
-All probe callbacks are hardware-free. GUI smoke tests verify previous-input
-routing against a fake backend. No physical switch is sent by automated tests.
-
-Native shortcut components deliberately omit the `.desktop` suffix. On Plasma,
-using the launcher-service ID makes component cleanup remove dynamic actions.
-A native-component/launcher-service comparison reproduced this failure; the
-window-level probe also covers registration after construction, discovery and
-focus events with isolated preferences and a fake monitor backend.
+The `monitor-profiles` regression group covers migration, file/JSON roundtrips,
+corrupt/newer file preservation, shortcut conflicts, unique/ambiguous/replaced
+monitor resolution, per-monitor input/source mapping, partial failures, failed-only
+retry, cycle/previous state and shared-monitor invalidation. `desktop-smoke` drives
+the editor with synthetic discovery and a fake ddcutil process, including drafts
+across tabs, grouped dispatch from a different active tab, export privacy, per-member
+results, external shortcut updates and disconnected members. Theme previews include
+single-monitor and grouped configurations. Windows CI builds the same editor and
+runs synthetic profile/preview tests; its fake AMD driver tests the optional EDID
+entry point. This does not establish physical Windows multi-monitor compatibility.
