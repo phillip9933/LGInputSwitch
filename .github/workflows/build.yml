@@ -55,12 +55,39 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install Qt
+      if: runner.os == 'Linux'
       uses: jurplel/install-qt-action@v4
       with:
         version: '6.8.3'
         arch: ${{ matrix.arch }}
         cache: true
-    - name: Configure desktop
+    - name: Configure Visual Studio x64 tools
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+    - name: Cache static Qt SDK
+      if: runner.os == 'Windows'
+      id: qt-cache
+      uses: actions/cache@v4
+      with:
+        path: build-static-qt/install
+        key: windows-2022-static-qt-${{ hashFiles('packaging/windows/qt-sources.json', 'scripts/build-static-qt.py') }}
+    - name: Build static Qt and embedded notices
+      if: runner.os == 'Windows'
+      run: python scripts/build-static-qt.py --parallel 2
+    - name: Save completed static SDK before application checks
+      if: runner.os == 'Windows' && steps.qt-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: build-static-qt/install
+        key: windows-2022-static-qt-${{ hashFiles('packaging/windows/qt-sources.json', 'scripts/build-static-qt.py') }}
+    - name: Configure static Windows desktop
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: cmake -S . -B build-desktop -G Ninja -DCMAKE_BUILD_TYPE=Release -DLG_BUILD_DESKTOP=ON "-DCMAKE_PREFIX_PATH=$PWD/build-static-qt/install" "-DLG_DISTRIBUTION_DIR=$PWD/build-distribution"
+    - name: Configure Linux desktop
+      if: runner.os == 'Linux'
       run: cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON
     - name: Build desktop and regression tests
       run: cmake --build build-desktop --config Release --parallel 2
@@ -71,25 +98,10 @@ jobs:
       env:
         QT_QPA_PLATFORM: offscreen
       run: ./build-desktop/LGInputSwitchDesktop --preview --screenshot-dir build-desktop/previews
-    - name: Deploy Windows Qt runtime
+    - name: Package portable Windows executable
       if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        New-Item -ItemType Directory -Force desktop-bundle
-        Copy-Item build-desktop/Release/LGInputSwitchDesktop.exe desktop-bundle/
-        windeployqt --release --no-translations --no-compiler-runtime --no-opengl-sw --no-system-d3d-compiler desktop-bundle/LGInputSwitchDesktop.exe
-        if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
-    - name: Download verified Microsoft runtime installer and package Windows release
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        Invoke-WebRequest https://aka.ms/vs/17/release/vc_redist.x64.exe -OutFile vc_redist.x64.exe
-        $signature = Get-AuthenticodeSignature ./vc_redist.x64.exe
-        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') { throw 'Microsoft runtime signature invalid' }
-        $qtPrefix = (& qtpaths --query QT_INSTALL_PREFIX).Trim()
-        python scripts/windows-release.py --source-dir build-qt-source --desktop desktop-bundle --legacy build-desktop/Release/LGInputSwitch.exe --qt-prefix $qtPrefix --redist vc_redist.x64.exe --output build-windows-release
-        if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
-    - name: Test extracted release with SDK paths removed
+      run: python scripts/windows-release.py --executable build-desktop/LGInputSwitchDesktop.exe --output build-windows-release
+    - name: Test the executable alone with SDK paths removed
       if: runner.os == 'Windows'
       timeout-minutes: 2
       shell: pwsh
@@ -97,45 +109,40 @@ jobs:
         QT_QPA_PLATFORM: windows
         QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
       run: |
-        Expand-Archive build-windows-release/LGInputSwitch-1.3.1-Windows-x64.zip build-packaged-test
+        $executable = (Resolve-Path ./build-windows-release/LGInputSwitch-1.3.2-Windows-x64.exe).Path
+        $dependencies = & dumpbin /dependents $executable
+        if ($LASTEXITCODE -ne 0) { throw 'PE dependency inspection failed' }
+        if ($dependencies -match '(?i)Qt[0-9].*\.dll|vcruntime.*\.dll|msvcp.*\.dll|libssl.*\.dll|libcrypto.*\.dll') { throw 'Portable app still imports an external runtime' }
+        New-Item -ItemType Directory -Force build-portable-test
+        Copy-Item $executable build-portable-test/LGInputSwitchDesktop.exe
+        $executable = (Resolve-Path ./build-portable-test/LGInputSwitchDesktop.exe).Path
         $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
         $env:QT_PLUGIN_PATH = ''
         $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
         $env:QML2_IMPORT_PATH = ''
-        $executable = (Resolve-Path ./build-packaged-test/LGInputSwitchDesktop.exe).Path
         $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion
-        if ($version -ne '1.3.1') { throw "Wrong product version: $version" }
+        if ($version -ne '1.3.2') { throw "Wrong product version: $version" }
         $process = Start-Process -FilePath $executable -ArgumentList '--version' -Wait -PassThru
-        if ($process.ExitCode -ne 0) { throw "Packaged version check failed: $($process.ExitCode)" }
+        if ($process.ExitCode -ne 0) { throw 'Portable version check failed' }
         $process = Start-Process -FilePath $executable -ArgumentList '--preview','--screenshot-dir','packaged-previews' -Wait -PassThru
-        if ($process.ExitCode -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw "Packaged preview failed: $($process.ExitCode)" }
-    - name: Upload Windows release archives and corresponding source
+        if ($process.ExitCode -ne 0 -or !(Test-Path packaged-previews/desktop-dark.png)) { throw 'Portable preview failed' }
+        $process = Start-Process -FilePath $executable -ArgumentList '--licenses','packaged-notices.txt' -Wait -PassThru
+        if ($process.ExitCode -ne 0 -or !(Select-String -Path packaged-notices.txt -Pattern 'GNU LESSER GENERAL PUBLIC LICENSE' -Quiet)) { throw 'Embedded notices missing' }
+    - name: Upload portable Windows release
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
-        name: LGInputSwitch-Windows-1.3.1
+        name: LGInputSwitch-Windows-1.3.2
         path: |
-          build-windows-release/*.zip
-          build-windows-release/*.tar.gz
-          build-windows-release/*.tar.xz
+          build-windows-release/*.exe
           build-windows-release/SOURCE_REVISION
           build-windows-release/SHA256SUMS-Windows
-    - name: Render Windows theme previews
-      if: runner.os == 'Windows'
-      timeout-minutes: 2
-      env:
-        QT_QPA_PLATFORM: offscreen
-        QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
-      shell: pwsh
-      run: |
-        $process = Start-Process -FilePath ./build-desktop/Release/LGInputSwitchDesktop.exe -ArgumentList '--preview','--screenshot-dir','build-desktop/previews' -Wait -PassThru
-        if ($process.ExitCode -ne 0) { throw 'Windows preview rendering failed' }
     - name: Upload desktop candidate and previews
       uses: actions/upload-artifact@v4
       with:
         name: LGInputSwitch-Desktop-${{ runner.os }}
         path: |
-          desktop-bundle/
+          build-windows-release/*.exe
           build-desktop/LGInputSwitchDesktop
           build-desktop/previews/
           docs/desktop-ui.md

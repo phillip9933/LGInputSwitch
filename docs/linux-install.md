@@ -8,16 +8,16 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-The [1.3.1 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.1) contains a native `.pkg.tar.zst` package, its corresponding
-source archive, PKGBUILD, source revision and SHA256SUMS. Download the package, source and SHA256SUMS from the release. CI also provides the
-`LGInputSwitch-CachyOS-Arch` artifact. This is
-not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
+The [1.3.2 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.2) contains the native `.pkg.tar.zst` package and SHA256SUMS alongside the Windows executable.
+GitHub supplies application source automatically. CI’s `LGInputSwitch-CachyOS-Arch`
+artifact retains the debug package, source archive, recipe and source revision.
+This is not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
 packages may require a system update before installation.
 
 Verify checksums in the extracted directory:
 
 ```
-sha256sum -c SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
 sudo pacman -U ./lginputswitch-*.pkg.tar.zst
 ```
 
@@ -67,6 +67,14 @@ monitor editor. Missing/unusable lists retain existing values. Select every memb
 in each action row. KDE's shortcut manager lists the actions under their profile
 names, and existing migrated shortcut IDs are retained. See
 [profile setup and retry behavior](desktop-ui.md#monitor-profiles).
+
+## Application updates
+
+Preferences can check for new releases, notify you, download them with progress
+and start package installation through the OS authorization dialog. Installation
+uses pacman for the native Arch/CachyOS package; it never overwrites `/usr/bin`
+directly. See [update behavior and recovery](updates.md). Other installations use
+the release page and their normal package manager or source build.
 
 ## Build a package from source
 

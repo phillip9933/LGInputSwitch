@@ -33,14 +33,19 @@ This project incorporates or was inspired by the following:
 - Used for reference; no source code copied.
 
 ## Qt 6 (optional desktop frontend)
-- The modern desktop frontend dynamically links Qt Widgets, GUI, Core and Concurrent.
+- The Windows portable app statically links Qt Widgets, GUI, Core, Concurrent and Network. Linux uses the distribution’s shared Qt libraries.
 - Qt is available under commercial and open-source licenses; see https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licenses.html .
-- Qt source is not vendored here. Include applicable Qt/runtime notices and satisfy redistribution obligations when packaging desktop builds. The legacy Windows executable and Linux CLI do not depend on Qt.
+- Qt source is available at the pinned official URL in packaging/windows/qt-sources.json and release notes. The Windows EXE embeds license/attribution and rebuild instructions, exportable with --licenses. The legacy Windows executable and Linux CLI do not depend on Qt.
 
 ## KDE Frameworks KGlobalAccel (optional KDE shortcuts)
 - Dynamically linked when available; no source is vendored.
 - Configurable global shortcuts for KDE Plasma: https://api.kde.org/kglobalaccel.html .
 - Preserve applicable KDE Frameworks license notices when packaging this dependency.
+
+## Microsoft C++ runtime (Windows)
+- Portable builds statically link the Microsoft C++ runtime from the Visual Studio toolchain. Copyright Microsoft Corporation.
+- This component retains Microsoft’s terms; it is not relicensed under the project AGPL. See [Microsoft runtime terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/) and [redistribution guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170).
+- Runtime updates require rebuilding the portable executable with the updated toolchain; no separate runtime installer is bundled.
 
 The project AGPL license does not relicense any of these dependencies.
 The Linux binary links distribution-provided Qt/KDE; those runtimes are not bundled.

@@ -44,10 +44,13 @@ def publish(assets, version):
         raise ValueError('A release with this version already exists; never overwrite published builds')
     output = assets / 'publish'
     output.mkdir()
+    selected = {'windows': f'LGInputSwitch-{version}-Windows-x64.exe',
+                'linux': f'lginputswitch-{version}-1-x86_64.pkg.tar.zst'}
     for kind, checksum in [('windows', 'SHA256SUMS-Windows'), ('linux', 'SHA256SUMS')]:
         directory = assets / kind
         if (directory / 'SOURCE_REVISION').read_text().strip() != revision:
             raise ValueError('Artifact source revision mismatch')
+        verified = set()
         for line in (directory / checksum).read_text().splitlines():
             expected, name = line.split(maxsplit=1)
             name = name.strip().removeprefix('./')
@@ -56,22 +59,11 @@ def publish(assets, version):
             path = directory / name
             if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                 raise ValueError('Artifact checksum mismatch: ' + name)
-        for path in directory.iterdir():
-            if path.is_file() and path.name not in ['SHA256SUMS', 'SHA256SUMS-Windows', 'SOURCE_REVISION']:
-                target = output / path.name
-                if target.exists() and target.read_bytes() != path.read_bytes():
-                    raise ValueError('Conflicting artifact name: ' + path.name)
-                target.write_bytes(path.read_bytes())
-    # Both platform revisions were checked above; publish one canonical LF file.
-    (output / 'SOURCE_REVISION').write_bytes((revision + '\n').encode('ascii'))
-    names = {p.name for p in output.iterdir()}
-    required = {f'LGInputSwitch-{version}-Windows-x64.zip',
-                f'LGInputSwitch-{version}-Windows-legacy-x64.zip',
-                f'LGInputSwitch-{version}-source.tar.gz',
-                f'lginputswitch-{version}-1-x86_64.pkg.tar.zst', 'lginputswitch-source.tar.gz',
-                'qtbase-everywhere-src-6.8.3.tar.xz', 'qtsvg-everywhere-src-6.8.3.tar.xz'}
-    if not required <= names:
-        raise ValueError('Release assets missing: ' + str(required - names))
+            verified.add(name)
+        name = selected[kind]
+        if name not in verified:
+            raise ValueError('Release asset missing or unchecked: ' + name)
+        (output / name).write_bytes((directory / name).read_bytes())
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(output.iterdir())}
     (output / 'SHA256SUMS').write_text(''.join(value + '  ' + name + '\n' for name, value in hashes.items()))
     files = sorted(p for p in output.iterdir() if p.is_file())

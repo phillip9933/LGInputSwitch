@@ -17,6 +17,8 @@ No third-party code is relicensed by this change.
 
 When distributing binaries, provide the corresponding source for the exact build,
 including build and packaging scripts, under the applicable license terms. The
-Windows and Linux release workflow includes corresponding source, dependency
-notices and SHA256 checksums; see [Windows release setup](docs/windows-release.md).
+release tag supplies application source through GitHub’s automatic archives;
+release notes link the exact Qt source and rebuild recipe. The Windows executable
+embeds notices/source links and exports them with --licenses. SHA256SUMS covers
+the Windows/Linux binary downloads; see [Windows setup](docs/windows-release.md).
 Repository: https://github.com/phillip9933/LGInputSwitch

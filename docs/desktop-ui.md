@@ -286,7 +286,7 @@ ctest --test-dir build-desktop -C Release --output-on-failure
 ```
 
 The executable is `LGInputSwitchDesktop` (Windows: `Release/LGInputSwitchDesktop.exe`).
-Windows releases include deployed Qt, the official runtime installer, exact source and notices; CI tests the extracted ZIP. Linux
+Windows releases use one portable executable with Qt/runtime and notices embedded; CI tests it alone. Linux
 needs the matching Qt runtime, desktop platform plugin and ddcutil. CMake installs
 the Linux executable, launcher and icon. The original Windows solution/executable
 and Linux CLI still build with no Qt dependency when the option is off.
@@ -299,6 +299,13 @@ cd build-desktop
 qmake6 ../desktop/desktop.pro
 make
 ```
+
+## Application updates
+
+Preferences includes automatic/manual checks, download progress/cancellation,
+release notes, Later and explicit installation/restart. See [updates](updates.md)
+for verification, platform behavior and recovery. The existing monitor controls,
+profiles, shortcuts and system/light/dark themes are retained.
 
 ## Design preview and verification
 

@@ -1,3 +1,4 @@
+#include "updates.h"
 #include "../core/input_value.h"
 #include "diagnostics.h"
 #include "kde_shortcuts.h"
@@ -82,6 +83,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     bool monitorAttention_ = false;
     QScrollArea *profileScroll_;
     QSystemTrayIcon *tray_;
+    QPointer<QWidget> notificationPage_;
     QMenu *menu_;
     QLabel *status_;
     QPlainTextEdit *results_, *diagnosticReport_;
@@ -1221,6 +1223,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                                      ? "Physical input changes are unverified."
                                      : "See per-monitor results; retry failed monitors when ready.");
                     message(text);
+                    notificationPage_.clear();
                     if (config_.notifications && tray_->isVisible())
                         tray_->showMessage("LG Input Switch", text,
                                            result.complete() ? QSystemTrayIcon::Information
@@ -1793,7 +1796,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         appearance_->addItem("Dark", "dark");
         appearance_->setCurrentIndex(qMax(0, appearance_->findData(config_.appearance)));
         form->addRow("Appearance", appearance_);
-        notifications_ = new QCheckBox("Show command notifications");
+        notifications_ = new QCheckBox("Show notifications");
         notifications_->setChecked(config_.notifications);
         form->addRow("Notifications", notifications_);
         startup_ = new QCheckBox("Launch when I sign in");
@@ -1835,6 +1838,31 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *aboutQt = new QPushButton("About Qt");
         connect(aboutQt, &QPushButton::clicked, this, [this] { QMessageBox::aboutQt(this); });
         form->addRow(aboutQt);
+#ifdef LG_DESKTOP_TEST
+        auto *updates = new UpdatePanel(true, this);
+#else
+        auto *updates = new UpdatePanel(preview_, this);
+#endif
+        form->addRow(updates);
+        updates->notify = [this, preferences](const QString &text) {
+            if (config_.notifications && tray_ && tray_->isVisible()) {
+                notificationPage_ = preferences;
+                tray_->showMessage("LG Input Switch", text, QSystemTrayIcon::Information, 10000);
+            }
+        };
+        updates->prepareInstall = [this] {
+            if (busy_) { message("Wait for the current monitor operation to finish before updating."); return false; }
+            captureDraft();
+            if (dirty_) {
+                const auto choice = QMessageBox::question(this, "Install update", "Save your changes before updating?",
+                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+                if (choice == QMessageBox::Cancel) return false;
+                if (choice == QMessageBox::Save) { save(); if (dirty_) return false; }
+            }
+            return true;
+        };
+        updates->installBusy = [this](bool value) { setBusy(value); tabs_->setEnabled(!value); };
+        updates->quitForUpdate = [this] { quitting_ = true; qApp->quit(); };
         tabs_->addTab(scrollPage(preferences, "preferencesScroll"), "Preferences");
         auto *advanced = new QFrame;
         advanced->setObjectName("card");
@@ -1920,6 +1948,14 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         connect(tray_, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
             if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick)
                 showWindow();
+        });
+        connect(tray_, &QSystemTrayIcon::messageClicked, this, [this] {
+            if (notificationPage_) {
+                for (int index = 0; index < tabs_->count(); ++index)
+                    if (tabs_->widget(index)->isAncestorOf(notificationPage_) || tabs_->widget(index) == notificationPage_)
+                        tabs_->setCurrentIndex(index);
+            }
+            showWindow();
         });
         connect(close, &QPushButton::clicked, this, [this] {
             if (tray_->isVisible() && QSystemTrayIcon::isSystemTrayAvailable())
@@ -2198,10 +2234,26 @@ int main(int argc, char **argv)
         return 0;
     }
 #endif
+#ifdef Q_OS_WIN
+    if (argc == 3 && std::strcmp(argv[1], "--apply-update") == 0) {
+        QCoreApplication helper(argc, argv);
+        return ApplyWindowsUpdate(helper.arguments().at(2));
+    }
+#else
+    char backgroundArgument[] = "--background";
+    if (argc == 3 && std::strcmp(argv[1], "--restart-after") == 0) {
+        bool valid = false; const auto parent = QString::fromLocal8Bit(argv[2]).toLongLong(&valid);
+        if (!valid || parent <= 0) return 2;
+        for (int wait = 0; wait < 300 && QFileInfo::exists("/proc/" + QString::number(parent)); ++wait)
+            QThread::msleep(100);
+        if (QFileInfo::exists("/proc/" + QString::number(parent))) return 3;
+        argv[1] = backgroundArgument; argc = 2;
+    }
+#endif
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
-    app.setApplicationVersion("1.3.1");
+    app.setApplicationVersion("1.3.2");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
@@ -2209,10 +2261,23 @@ int main(int argc, char **argv)
     parser.setApplicationDescription("LG monitor input switching with a tray and global shortcuts.");
     parser.addHelpOption();
     parser.addVersionOption();
+    parser.addOption({"update-ready", "Confirm a completed portable update (internal).", "plan"});
+#ifdef LG_EMBEDDED_DISTRIBUTION
+    parser.addOption({"licenses", "Export embedded license texts, source links and rebuild instructions.", "file"});
+#endif
     parser.addOption({"preview", "Show synthetic data without accessing settings or hardware."});
     parser.addOption({"background", "Start in the tray when a tray host is available."});
     parser.addOption({"screenshot-dir", "Render design previews (requires --preview).", "directory"});
     parser.process(app);
+#ifdef LG_EMBEDDED_DISTRIBUTION
+    if (parser.isSet("licenses")) {
+        QFile source(":/distribution/THIRD-PARTY-NOTICES.txt");
+        QSaveFile destination(parser.value("licenses"));
+        if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly)) return 2;
+        const auto data = source.readAll();
+        return destination.write(data) == data.size() && destination.commit() ? 0 : 3;
+    }
+#endif
     const bool preview = parser.isSet("preview");
     if (parser.isSet("screenshot-dir") && !preview)
         parser.showHelp(2);
@@ -2233,6 +2298,14 @@ int main(int argc, char **argv)
     DesktopWindow window(preview);
     if (preview || !parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable())
         window.show();
+    if (parser.isSet("update-ready")) {
+        const auto plan = QFileInfo(parser.value("update-ready"));
+        if (plan.absolutePath() == QFileInfo(QCoreApplication::applicationFilePath()).absolutePath() &&
+            QRegularExpression("^\\.lginputswitch-update-[0-9a-f-]{36}\\.json$").match(plan.fileName()).hasMatch()) {
+            QSaveFile ready(plan.absoluteFilePath() + ".ready");
+            if (ready.open(QIODevice::WriteOnly)) { ready.write("ready"); ready.commit(); }
+        }
+    }
     if (preview && parser.isSet("screenshot-dir"))
         QTimer::singleShot(300, &window, [&] {
             window.capture(parser.value("screenshot-dir"));
