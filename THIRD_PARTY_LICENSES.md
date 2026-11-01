@@ -42,6 +42,11 @@ This project incorporates or was inspired by the following:
 - Configurable global shortcuts for KDE Plasma: https://api.kde.org/kglobalaccel.html .
 - Preserve applicable KDE Frameworks license notices when packaging this dependency.
 
+## Microsoft C++ runtime (Windows)
+- Portable builds statically link the Microsoft C++ runtime from the Visual Studio toolchain. Copyright Microsoft Corporation.
+- This component retains Microsoft’s terms; it is not relicensed under the project AGPL. See [Microsoft runtime terms](https://visualstudio.microsoft.com/license-terms/vs2022-cruntime/) and [redistribution guidance](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170).
+- Runtime updates require rebuilding the portable executable with the updated toolchain; no separate runtime installer is bundled.
+
 The project AGPL license does not relicense any of these dependencies.
 The Linux binary links distribution-provided Qt/KDE; those runtimes are not bundled.
 

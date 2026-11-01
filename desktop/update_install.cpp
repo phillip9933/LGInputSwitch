@@ -144,9 +144,17 @@ int ApplyWindowsUpdate(const QString &planPath) {
         else MessageBoxW(nullptr, L"Restore the .previous executable in the app folder.", L"LG Input Switch", MB_OK | MB_ICONERROR);
         return 6;
     }
-    qint64 newPid = 0;
-    const bool launched = QProcess::startDetached(target, {"--update-ready", planPath}, parent, &newPid);
-    HANDLE restarted = launched ? OpenProcess(SYNCHRONIZE, FALSE, DWORD(newPid)) : nullptr;
+    // Retain the actual process handle so even an immediate crash is observed.
+    // Reopening a detached PID can lose that race after Windows retires the PID.
+    const auto executable = target.toStdWString(), workingDirectory = parent.toStdWString();
+    auto command = ("\"" + QDir::toNativeSeparators(target) + "\" --update-ready \"" +
+                    QDir::toNativeSeparators(planPath) + "\"").toStdWString();
+    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child{};
+    const bool launched = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, nullptr, workingDirectory.c_str(), &startup, &child);
+    if (launched) CloseHandle(child.hThread);
+    HANDLE restarted = launched ? child.hProcess : nullptr;
     bool healthy = false, exited = !launched;
     for (int i = 0; launched && i < 200; ++i) {
         if (QFileInfo::exists(planPath + ".ready")) { healthy = true; break; }
