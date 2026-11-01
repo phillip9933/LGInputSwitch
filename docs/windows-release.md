@@ -26,6 +26,14 @@ save it with your issue. It includes the last command, read-only monitor checks,
 advertised controls/input values and system/build details. No input is switched
 and nothing is uploaded automatically. See [diagnostic details](desktop-ui.md#built-in-diagnostics).
 
+### Upcoming startup fix
+
+The development build starts in the tray when **Launch when I sign in** is enabled,
+using the existing `--background` option without another checkbox. Manual launches
+open the window; without a tray, the window opens at sign-in too. After upgrading
+from 1.3.0, save settings once to refresh an already-enabled startup entry.
+The published 1.3.0 build still opens its window at Windows sign-in.
+
 ## Upgrade and legacy frontend
 
 Quit any older LGInputSwitch before upgrading. Back up config.json and
