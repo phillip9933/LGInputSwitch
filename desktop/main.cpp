@@ -991,7 +991,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         showResults();
         updateActions();
 #ifdef Q_OS_WIN
-        if (!SetStartWithWindows(config_.startup))
+        if (!SetStartWithWindows(config_.startup, true))
             message("Profiles saved, but Windows startup could not be updated.");
 #else
         if (!SetDesktopAutostart(config_.startup, error))
@@ -1798,6 +1798,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         form->addRow("Notifications", notifications_);
         startup_ = new QCheckBox("Launch when I sign in");
         startup_->setObjectName("startup");
+        startup_->setToolTip("Starts in the system tray. Without a tray, the window opens instead.");
         startup_->setChecked(config_.startup);
         form->addRow("Startup", startup_);
         globalShortcuts_ = new QCheckBox("Enable global shortcuts while the app is running");

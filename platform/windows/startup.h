@@ -4,7 +4,7 @@
 #pragma comment(lib, "advapi32.lib")
 
 // Per-user startup, no elevation. Quote the executable path for spaces/Unicode.
-inline bool SetStartWithWindows(bool enabled) {
+inline bool SetStartWithWindows(bool enabled, bool startInTray = false) {
     constexpr auto keyPath = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
     HKEY key = nullptr;
     LONG rc = RegCreateKeyExW(HKEY_CURRENT_USER, keyPath, 0, nullptr, 0,
@@ -14,7 +14,8 @@ inline bool SetStartWithWindows(bool enabled) {
         wchar_t path[MAX_PATH]{};
         DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
         std::wstring command = L"\"" + std::wstring(path, length) + L"\"";
-        // Run-key command lines are limited to 260 characters (including quotes).
+        if (startInTray) command += L" --background";
+        // Run-key command lines are limited to 260 characters, including arguments.
         if (!length || length >= MAX_PATH || command.size() >= MAX_PATH) {
             RegCloseKey(key);
             return false;
