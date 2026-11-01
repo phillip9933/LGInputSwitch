@@ -8,7 +8,7 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-The [1.3.0 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.0) contains a native `.pkg.tar.zst` package, its corresponding
+The [1.3.1 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.1) contains a native `.pkg.tar.zst` package, its corresponding
 source archive, PKGBUILD, source revision and SHA256SUMS. Download the package, source and SHA256SUMS from the release. CI also provides the
 `LGInputSwitch-CachyOS-Arch` artifact. This is
 not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release

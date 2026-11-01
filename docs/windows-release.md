@@ -1,6 +1,6 @@
-# LG Input Switch 1.3.0 — Windows x64
+# LG Input Switch 1.3.1 — Windows x64
 
-Download `LGInputSwitch-1.3.0-Windows-x64.zip` from the numeric `1.3.0` release.
+Download `LGInputSwitch-1.3.1-Windows-x64.zip` from the numeric `1.3.1` release.
 Extract the complete ZIP to a writable folder in your user profile. Keep the
 folders, DLLs and notices beside `LGInputSwitchDesktop.exe`; start that executable.
 Windows currently requires an AMD GPU/driver. Intel/NVIDIA backends and macOS
@@ -26,13 +26,12 @@ save it with your issue. It includes the last command, read-only monitor checks,
 advertised controls/input values and system/build details. No input is switched
 and nothing is uploaded automatically. See [diagnostic details](desktop-ui.md#built-in-diagnostics).
 
-### Upcoming startup fix
+### Startup in the system tray
 
-The development build starts in the tray when **Launch when I sign in** is enabled,
+Version 1.3.1 starts in the tray when **Launch when I sign in** is enabled,
 using the existing `--background` option without another checkbox. Manual launches
 open the window; without a tray, the window opens at sign-in too. After upgrading
 from 1.3.0, save settings once to refresh an already-enabled startup entry.
-The published 1.3.0 build still opens its window at Windows sign-in.
 
 ## Upgrade and legacy frontend
 
@@ -44,7 +43,7 @@ additional configured targets are retained when saving. Its appearance and
 previous/disabled-row preferences are stored per-user by Qt. Restore your backed-up
 config and old executable to roll back. Do not extract over a running executable.
 
-`LGInputSwitch-1.3.0-Windows-legacy-x64.zip` contains the original Win32 frontend
+`LGInputSwitch-1.3.1-Windows-legacy-x64.zip` contains the original Win32 frontend
 with maintenance fixes, for users who prefer it. Run only one frontend at a time:
 they share config.json conventions, the Windows startup entry and global keys.
 Both folders must remain writable for config.json. Windows Startup Apps may
@@ -93,7 +92,7 @@ Windows bundle omits the optional Mesa software-OpenGL DLL and Microsoft shader
 compiler; this app uses raster Widgets and does not require Qt Quick/OpenGL.
 
 Corresponding application source and build/packaging scripts are attached as
-`LGInputSwitch-1.3.0-source.tar.gz`. SOURCE_REVISION identifies the exact tested
+`LGInputSwitch-1.3.1-source.tar.gz`. SOURCE_REVISION identifies the exact tested
 Git commit. BUILD-INFO.json records the Qt source hashes and runtime-installer hash;
 MANIFEST.json hashes the extracted bundle files. The release-level SHA256SUMS
 covers all downloadable application/dependency source and package assets.

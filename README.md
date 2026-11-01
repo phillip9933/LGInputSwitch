@@ -37,7 +37,7 @@ or save it with your [issue](https://github.com/phillip9933/LGInputSwitch/issues
 Reports stay local until you share them.
 
 [Build the desktop app](docs/desktop-ui.md) · [Linux CLI](docs/linux-cli.md) ·
-[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.0.md)
+[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.1.md)
 
 ## License and credits
 

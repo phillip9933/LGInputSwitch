@@ -102,7 +102,7 @@ Appearance (Follow system/Light/Dark), notifications, startup and debounce remai
 app-wide. Advanced can reveal input codes beside the input names. Closing hides
 to the tray when available; without a tray it quits after the unsaved-edits prompt.
 
-In the development build, **Launch when I sign in** starts directly in the tray
+Since version 1.3.1, **Launch when I sign in** starts directly in the tray
 on Windows as well as Linux. No separate minimized-start setting is needed.
 Manual launches open the window; without a tray host, startup opens it too.
 After upgrading from 1.3.0 on Windows, save settings once with startup enabled
