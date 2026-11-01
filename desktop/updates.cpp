@@ -46,6 +46,7 @@ UpdatePanel::UpdatePanel(bool preview, QWidget *parent) : QWidget(parent), previ
     connect(cancel_, &QPushButton::clicked, this, [this] { if (reply_) reply_->abort(); });
     state("Version " + installed_);
     if (!preview) QTimer::singleShot(2500, this, [this] {
+        CleanupWindowsUpdateFiles();
         auto settings = Settings();
         const auto result = settings.value("updates/result").toString();
         if (!result.isEmpty()) {
@@ -53,6 +54,12 @@ UpdatePanel::UpdatePanel(bool preview, QWidget *parent) : QWidget(parent), previ
         }
         if (AutomaticUpdateDue(automatic_->isChecked(), settings.value("updates/lastCheck").toLongLong(), QDateTime::currentSecsSinceEpoch())) check(false);
     });
+    if (!preview) {
+        auto *timer = new QTimer(this);
+        timer->setInterval(60 * 60 * 1000);
+        connect(timer, &QTimer::timeout, this, [this] { check(false); });
+        timer->start();
+    }
 }
 void UpdatePanel::state(const QString &message, bool working) {
     working_ = working;
@@ -86,21 +93,26 @@ void UpdatePanel::fetch(const QUrl &url, qint64 limit, std::function<void(QByteA
         if (total > 0) progress_->setValue(int(qMin<qint64>(100, got * 100 / total)));
     });
     connect(reply, &QNetworkReply::finished, this, [this, reply, data, exceeded, done, limit, redirects] {
+        const auto tail = reply->readAll();
+        if (tail.size() > limit - data->size()) *exceeded = true;
+        else data->append(tail);
         const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto redirect = reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
         const auto next = reply->url().resolved(redirect);
         const auto networkError = reply->error(); reply->deleteLater(); reply_.clear();
         if (*exceeded) { done({}, "Update response exceeded its size limit."); return; }
+        if (status == 403 || status == 429) { done({}, "GitHub temporarily limited update checks. Try again later."); return; }
         if (networkError != QNetworkReply::NoError) {
             done({}, networkError == QNetworkReply::OperationCanceledError ? "Update download cancelled or timed out." : "Could not reach GitHub. Check your connection and try again."); return;
         }
         if (status >= 300 && status < 400 && !redirect.isEmpty()) { fetch(next, limit, done, redirects + 1); return; }
-        if (status != 200) { done({}, status == 403 || status == 429 ? "GitHub temporarily limited update checks. Try again later." : "GitHub did not return the requested update."); return; }
+        if (status != 200) { done({}, "GitHub did not return the requested update."); return; }
         done(*data, {});
     });
 }
 void UpdatePanel::check(bool manual) {
     if (working_ || preview_) { if (preview_) state("Design preview · update checks are disabled."); return; }
+    if (QSysInfo::buildCpuArchitecture() != "x86_64") { state("Use the release page for this architecture."); return; }
     auto settings = Settings();
     if (!manual && !AutomaticUpdateDue(automatic_->isChecked(), settings.value("updates/lastCheck").toLongLong(), QDateTime::currentSecsSinceEpoch())) return;
     settings.setValue("updates/lastCheck", QDateTime::currentSecsSinceEpoch());
@@ -140,7 +152,7 @@ void UpdatePanel::download() {
 }
 bool UpdatePanel::linuxManaged() const {
     if (QCoreApplication::applicationFilePath() != "/usr/bin/LGInputSwitchDesktop") return false;
-    QProcess process; process.start("pacman", {"-Qoq", QCoreApplication::applicationFilePath()});
+    QProcess process; process.start("/usr/bin/pacman", {"-Qoq", QCoreApplication::applicationFilePath()});
     return process.waitForFinished(3000) && process.exitCode() == 0 && process.readAllStandardOutput().trimmed() == "lginputswitch";
 }
 void UpdatePanel::install() {
@@ -151,28 +163,31 @@ void UpdatePanel::install() {
     if (prepareInstall && !prepareInstall()) return;
     if (!StartWindowsUpdate(offer_, downloaded_, error)) { state(error); return; }
     stopping_ = true; state("Closing to install the update…", true);
+    if (installBusy) installBusy(true);
     if (quitForUpdate) quitForUpdate();
 #else
     if (!linuxManaged()) { state("Automatic installation requires the native Arch/CachyOS package. Use the release page for your installation."); return; }
-    QProcess inspect; inspect.start("pacman", {"-Qp", downloaded_});
+    QProcess inspect; inspect.start("/usr/bin/pacman", {"-Qp", downloaded_});
     if (!inspect.waitForFinished(5000) || inspect.exitCode() != 0 ||
         inspect.readAllStandardOutput().trimmed() != ("lginputswitch " + offer_.version + "-1").toUtf8()) {
         state("The downloaded package name or version did not match this release."); return;
     }
     if (prepareInstall && !prepareInstall()) return;
     auto *process = new QProcess(this); stopping_ = true;
+    if (installBusy) installBusy(true);
     state("Approve the system authorization prompt to install this package…", true);
     connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
-        stopping_ = false; state("Could not start the package manager. Nothing was installed."); process->deleteLater();
+        stopping_ = false; if (installBusy) installBusy(false);
+        state("Could not start the package manager. Nothing was installed."); process->deleteLater();
     });
     connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this, process](int code, QProcess::ExitStatus status) {
-        process->deleteLater(); stopping_ = false;
+        process->deleteLater(); stopping_ = false; if (installBusy) installBusy(false);
         if (status != QProcess::NormalExit || code != 0) { state("Package installation failed or was cancelled. Check system dependencies and try again."); return; }
         auto settings = Settings(); settings.setValue("updates/result", "Updated to " + offer_.version + "."); settings.sync();
         if (QProcess::startDetached(QCoreApplication::applicationFilePath(), {"--restart-after", QString::number(QCoreApplication::applicationPid())})) {
             if (quitForUpdate) quitForUpdate();
         } else state("Update installed. Please restart LG Input Switch from your application menu.");
     });
-    process->start("pkexec", {"--disable-internal-agent", "pacman", "-U", "--noconfirm", downloaded_});
+    process->start("/usr/bin/pkexec", {"--disable-internal-agent", "/usr/bin/pacman", "-U", "--noconfirm", downloaded_});
 #endif
 }

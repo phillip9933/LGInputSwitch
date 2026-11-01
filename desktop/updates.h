@@ -26,5 +26,6 @@ class UpdatePanel : public QWidget {
     std::function<void(const QString &)> notify;
     std::function<bool()> prepareInstall;
     std::function<void()> quitForUpdate;
+    std::function<void(bool)> installBusy;
     void check(bool manual = true);
 };

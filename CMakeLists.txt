@@ -51,8 +51,7 @@ if(LG_BUILD_DESKTOP)
             find_package(Qt6 REQUIRED COMPONENTS DBus)
         endif()
     endif()
-    # Qt's Windows entrypoint/runtime uses the dynamic MSVC CRT. Compile the
-    # same portable core with that runtime without changing legacy /MT builds.
+    # Match the Qt SDK: portable Windows uses /MT; shared SDKs use /MD.
     add_library(lginput_desktop_core core/input_switcher.cpp)
     if(MSVC AND NOT LG_QT_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
         set_property(TARGET lginput_desktop_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -120,6 +119,7 @@ if(LG_BUILD_DESKTOP)
             add_executable(update_install_test tests/update_install_windows.cpp desktop/update_policy.cpp
                 desktop/update_install.cpp resource/app.rc)
             target_link_libraries(update_install_test PRIVATE Qt6::Core version)
+            target_include_directories(update_install_test PRIVATE resource)
             if(MSVC AND NOT LG_QT_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
                 set_property(TARGET update_install_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
             endif()

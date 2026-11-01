@@ -269,6 +269,10 @@ struct DesktopWindowProbe
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    check(QSslSocket::supportsSsl() && QSslSocket::activeBackend() == "schannel",
+          "Portable update transport is missing Windows native TLS");
+#endif
     app.setOrganizationName("LGInputSwitchTests");
     app.setApplicationName("Desktop");
     app.setStyle("Fusion");
@@ -306,6 +310,11 @@ int main(int argc, char **argv)
     {
         DesktopWindow preview(true);
         preview.show();
+        auto *updateCheck = preview.findChild<QPushButton *>("checkUpdates");
+        check(updateCheck, "Update controls are missing");
+        updateCheck->click();
+        check(preview.findChild<QLabel *>("updateStatus")->text().contains("disabled"),
+              "Design preview attempted an update request");
         app.processEvents();
         auto *appearance = preview.findChild<QComboBox *>("appearance");
         auto *table = preview.findChild<QTableWidget *>("inputs");

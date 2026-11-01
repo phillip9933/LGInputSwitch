@@ -68,6 +68,7 @@ jobs:
         arch: x64
     - name: Cache static Qt SDK
       if: runner.os == 'Windows'
+      id: qt-cache
       uses: actions/cache@v4
       with:
         path: build-static-qt/install
@@ -75,6 +76,12 @@ jobs:
     - name: Build static Qt and embedded notices
       if: runner.os == 'Windows'
       run: python scripts/build-static-qt.py --parallel 2
+    - name: Save completed static SDK before application checks
+      if: runner.os == 'Windows' && steps.qt-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: build-static-qt/install
+        key: windows-2022-static-qt-${{ hashFiles('packaging/windows/qt-sources.json', 'scripts/build-static-qt.py') }}
     - name: Configure static Windows desktop
       if: runner.os == 'Windows'
       shell: pwsh

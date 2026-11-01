@@ -1,127 +1,80 @@
-# LG Input Switch 1.3.1 — Windows x64
+# Windows portable app
 
-Download `LGInputSwitch-1.3.1-Windows-x64.zip` from the numeric `1.3.1` release.
-Extract the complete ZIP to a writable folder in your user profile. Keep the
-folders, DLLs and notices beside `LGInputSwitchDesktop.exe`; start that executable.
-Windows currently requires an AMD GPU/driver. Intel/NVIDIA backends and macOS
-support remain roadmap work.
+Download `LGInputSwitch-1.3.2-Windows-x64.exe` from the
+[1.3.2 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.2),
+put it in a writable folder and run it. There is no installer, Qt DLL folder or
+separate Microsoft runtime setup. Windows switching still requires an AMD GPU.
 
-If Windows reports missing MSVCP/VCRUNTIME DLLs, run the included, unmodified
-`runtime/VC_redist.x64.exe`. It is the official Microsoft installer, whose
-Authenticode signature is checked during packaging. It presents Microsoft's own
-license terms; Microsoft files are not relicensed by the application's AGPL.
-Existing newer VC++ runtimes can be retained. No runtime installer is executed
-silently by this application.
+Choose your monitors, review the input mappings and save. Profiles, tray controls,
+shortcuts, themes and diagnostics work as before. **Launch when I sign in** starts
+in the tray; save settings after moving/renaming the executable to update its path.
 
-Choose each monitor explicitly, review its detected inputs and save. Use LG's
-alternate F4 method for known LG mappings or standard DDC/CI Input Source (0x60)
-for compatible monitors such as Dell. Codes differ across monitor models; do not
-guess or scan codes. Settings include direct, cycle and previous-input
-shortcuts, notifications, system/light/dark appearance and start-on-sign-in.
-Previous input remembers accepted selections in this session, not the initial
-physical input. A success notification means the command was sent without readback.
+## Upgrade and updates
 
-For troubleshooting, open **Diagnostics → Create report**, review it, then copy or
-save it with your issue. It includes the last command, read-only monitor checks,
-advertised controls/input values and system/build details. No input is switched
-and nothing is uploaded automatically. See [diagnostic details](desktop-ui.md#built-in-diagnostics).
+Quit the old app and back up config.json and desktop-profiles.json before a manual
+upgrade. Keep them beside the replacement executable. Keep the filename and folder
+stable for future upgrades. Old Qt DLL/runtime folders are not needed by the new
+portable executable. Earlier releases remain available for rollback.
 
-### Startup in the system tray
+The app retains its configuration import from older versions. Complete profiles
+are saved atomically in desktop-profiles.json; appearance preferences and update
+check preferences use the existing per-user Qt settings. No updater replaces
+settings files, changes monitor mappings or alters Windows Startup Apps policy.
 
-Version 1.3.1 starts in the tray when **Launch when I sign in** is enabled,
-using the existing `--background` option without another checkbox. Manual launches
-open the window; without a tray, the window opens at sign-in too. After upgrading
-from 1.3.0, save settings once to refresh an already-enabled startup entry.
+Starting with 1.3.2, **Preferences → Application updates** can check GitHub, show
+release notes, download a verified update, and install/restart when you choose.
+The app asks about unsaved changes and keeps the previous executable. See
+[update behavior, trust and recovery](updates.md). The first updater-capable
+version must be downloaded manually.
 
-## Upgrade and legacy frontend
+To uninstall, disable startup, quit and remove the executable. Keep or remove your
+settings separately. Windows may show SmartScreen prompts because builds are
+unsigned. SHA256SUMS verifies the downloaded bytes against the release manifest.
 
-Quit any older LGInputSwitch before upgrading. Back up config.json and
-desktop-profiles.json (if present), then copy them next to the new executable
-before starting it. The modern frontend
-reads the legacy first target, custom mappings, enabled order and shortcuts;
-additional configured targets are retained when saving. Its appearance and
-previous/disabled-row preferences are stored per-user by Qt. Restore your backed-up
-config and old executable to roll back. Do not extract over a running executable.
+## Source and licenses
 
-`LGInputSwitch-1.3.1-Windows-legacy-x64.zip` contains the original Win32 frontend
-with maintenance fixes, for users who prefer it. Run only one frontend at a time:
-they share config.json conventions, the Windows startup entry and global keys.
-Both folders must remain writable for config.json. Windows Startup Apps may
-independently disable an enabled startup entry. Disable startup in the app before
-removing its folder; uninstalling is otherwise just quitting and removing the
-extracted folder. Keep your backed-up configuration if you want to retain it.
+The release has three uploaded assets: the Windows EXE, Linux package and
+SHA256SUMS. GitHub supplies application-source ZIP/tar.gz downloads from the exact
+tag. Qt source is supplied separately through the pinned official archive link
+in the release notes and [source recipe](../packaging/windows/qt-sources.json).
+Those links must remain available while binaries are distributed.
 
-## Monitor profiles
+The executable embeds the project/dependency license texts, attribution, source
+links, checksums and rebuild instructions. Export them to a text file with:
 
-Version 1.3.0 adds profiles to the modern frontend. Existing 1.2 config.json
-and per-user preferences are imported into one Main monitor profile. Confirm the
-connection and save. The new workspace is stored atomically in
-**desktop-profiles.json beside LGInputSwitchDesktop.exe**; keep this file when
-moving/upgrading the modern app. The original config.json is preserved for legacy
-rollback. The legacy frontend does not support profiles or grouped commands. Per-monitor
-method selection also adds standard DDC/CI input-source commands (0x60), including
-for compatible Dell models, through the existing AMD backend. This does not remove
-the Windows AMD requirement. Automatic input setup uses a timed, read-only native
-query only when the selected AMD monitor can be uniquely matched by EDID; otherwise
-it keeps the previous mapping. See the desktop UI documentation for custom overrides.
+```
+LGInputSwitch-1.3.2-Windows-x64.exe --licenses notices.txt
+```
 
-Use + Profile for an independent set of actions, + Monitor to assign displays,
-and each monitor's Edit menu to maintain its shared input-code mapping. One action
-can select a different input on each monitor. Shortcuts and tray entries name the
-profile; partial failures have per-monitor results and a failed-only retry.
-See [profile setup](desktop-ui.md#monitor-profiles).
+Project code is AGPL-3.0-or-later; Qt uses LGPLv3 and bundled third-party terms
+remain intact. Qt and the C++ runtime are statically linked in the portable build.
+No AMD driver DLL is included; the installed AMD driver is loaded from Windows.
+No signature/integrity enforcement prevents rebuilding or running modified Qt or
+application code. The updater only verifies downloaded updates before installation.
 
-## Licenses, corresponding source and replacement libraries
+## Rebuild the Windows portable executable
 
-Project code is AGPL-3.0-or-later; full terms are in LICENSE.md. MIT dependency
-notices and embedded-code attribution are in licenses/ and THIRD_PARTY_LICENSES.md.
-The earlier adapted upstream AMD implementation and unused CLI have been removed
-from this release. The replacement in platform/windows/ is newly written against
-AMD's documented API; the protocol encoder in core/ constructs the documented
-wire data. Historical inspiration and upstream acknowledgement remain credited.
-No AMD driver DLL is distributed; the app loads the installed x64 driver from the
-Windows system directory.
+Use the Visual Studio 2022 x64 developer environment with CMake 3.21+, Ninja and
+Python 3. The repository includes the exact source URL, SHA256 and Qt configure
+arguments. Run from an exact release checkout:
 
-The modern frontend dynamically links **Qt 6.8.3** under LGPLv3. Copyright The Qt
-Company Ltd. and other authors identified in the included notices and sources.
-`qt-notices/` contains the exact upstream license texts, attribution records and
-third-party source notices for the shipped Qt modules. `QT-SOURCE.md` identifies
-the complete qtbase/qtsvg source archives attached beside the application ZIP.
-These archives are pinned by SHA256 in packaging/windows/qt-sources.json. The
-Windows bundle omits the optional Mesa software-OpenGL DLL and Microsoft shader
-compiler; this app uses raster Widgets and does not require Qt Quick/OpenGL.
+```
+python scripts/build-static-qt.py --parallel 2
+cmake -S . -B build-desktop -G Ninja -DCMAKE_BUILD_TYPE=Release -DLG_BUILD_DESKTOP=ON -DCMAKE_PREFIX_PATH=build-static-qt/install -DLG_DISTRIBUTION_DIR=build-distribution
+cmake --build build-desktop --parallel 2
+ctest --test-dir build-desktop --output-on-failure
+python scripts/windows-release.py --executable build-desktop/LGInputSwitchDesktop.exe --output build-windows-release
+```
 
-Corresponding application source and build/packaging scripts are attached as
-`LGInputSwitch-1.3.1-source.tar.gz`. SOURCE_REVISION identifies the exact tested
-Git commit. BUILD-INFO.json records the Qt source hashes and runtime-installer hash;
-MANIFEST.json hashes the extracted bundle files. The release-level SHA256SUMS
-covers all downloadable application/dependency source and package assets.
+Use absolute prefix/distribution paths if configuring outside the repository.
+The SDK cache records its exact source/configuration. To rebuild modified Qt,
+extract and modify the linked Qt source, configure it with the recorded options
+and a separate prefix, build/install it, then point CMAKE_PREFIX_PATH at that prefix.
+The full application source is supplied, so it can be recompiled/relinked against
+that modified SDK. No proprietary application objects or signing key are needed.
 
-To rebuild the app, use Visual Studio 2022 C++ tools (Windows SDK), CMake and Qt
-6.8.3 MSVC2022 x64. Configure `cmake -S . -B build -A x64 -DLG_BUILD_DESKTOP=ON`,
-build with `cmake --build build --config Release`, and run
-`ctest --test-dir build -C Release --output-on-failure`. The full release workflow
-and exact SDK setup are in .github/workflows/build.yml and release.yml.
-
-To replace Qt, build the attached Qt module sources for Windows x64 using the
-upstream README/CMake build instructions and a matching MSVC runtime. The original
-SDK configuration files are in qt-build-config/. Build qtbase first, then qtsvg
-against that installation. Quit the app and replace its Qt DLLs/plugins with
-interface-compatible builds, retaining the matching platform plugin. Rebuild or
-relink the application if your Qt build changes the ABI. No integrity check or
-signature enforcement prevents replacement, debugging or relinking of LGPL code.
-Our application license adds no prohibition on debugging those modifications.
-See https://doc.qt.io/qt-6.8/windows-building.html for platform build prerequisites.
-
-## Verification limits
-
-The release workflow builds both frontends, tests the real Windows loader/packet
-path against isolated fake driver DLLs, exercises failure/retry/targeting and
-startup registry behavior, and launches the extracted modern ZIP with Qt SDK PATH
-entries removed. No test sends monitor commands. Linux physical switching and
-shortcuts were tested by the maintainer; physical Windows AMD switching, real
-sign-in, DPI/theme changes and hardware reports #4/#5 remain unverified. These
-limits are stated in this full release rather than implied to be hardware fixes.
-
-The archives are unsigned. Windows may display SmartScreen prompts for an
-unsigned/new application. Checksums verify file integrity, not publisher identity.
+The official workflow inspects PE dependencies and runs the executable alone
+with Qt/compiler SDK paths removed, exports embedded notices, renders both themes,
+and tests native update replacement/rollback with synthetic executables. It also
+runs shared backend, profile and startup tests. No physical monitor commands are
+sent. Real Windows hardware, sign-in and DPI/theme testing remain limited.

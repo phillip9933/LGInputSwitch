@@ -6,3 +6,4 @@
 bool StartWindowsUpdate(const UpdateOffer &offer, const QString &download, QString &error);
 int ApplyWindowsUpdate(const QString &planPath);
 QString WindowsExecutableVersion(const QString &path);
+void CleanupWindowsUpdateFiles();

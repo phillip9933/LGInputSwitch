@@ -33,9 +33,9 @@ This project incorporates or was inspired by the following:
 - Used for reference; no source code copied.
 
 ## Qt 6 (optional desktop frontend)
-- The modern desktop frontend dynamically links Qt Widgets, GUI, Core and Concurrent.
+- The Windows portable app statically links Qt Widgets, GUI, Core, Concurrent and Network. Linux uses the distribution’s shared Qt libraries.
 - Qt is available under commercial and open-source licenses; see https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licenses.html .
-- Qt source is not vendored here. Include applicable Qt/runtime notices and satisfy redistribution obligations when packaging desktop builds. The legacy Windows executable and Linux CLI do not depend on Qt.
+- Qt source is available at the pinned official URL in packaging/windows/qt-sources.json and release notes. The Windows EXE embeds license/attribution and rebuild instructions, exportable with --licenses. The legacy Windows executable and Linux CLI do not depend on Qt.
 
 ## KDE Frameworks KGlobalAccel (optional KDE shortcuts)
 - Dynamically linked when available; no source is vendored.

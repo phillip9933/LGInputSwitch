@@ -13,31 +13,35 @@ static bool waitFor(const QString &path) {
 }
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
-    if (argc == 3 && QString::fromLocal8Bit(argv[1]) == "--apply-update")
-        return ApplyWindowsUpdate(QString::fromLocal8Bit(argv[2]));
-    if (argc == 5 && QString::fromLocal8Bit(argv[1]) == "--simulate-update") {
+    const auto arguments = app.arguments();
+    if (argc == 3 && arguments.at(1) == "--apply-update")
+        return ApplyWindowsUpdate(arguments.at(2));
+    if (argc == 5 && arguments.at(1) == "--simulate-update") {
         UpdateOffer offer;
-        const auto candidate = QString::fromLocal8Bit(argv[2]);
-        offer.version = "99.0.0"; offer.sha256 = QString::fromLocal8Bit(argv[3]); offer.size = QFileInfo(candidate).size();
+        const auto candidate = arguments.at(2);
+        offer.version = "99.0.0"; offer.sha256 = arguments.at(3); offer.size = QFileInfo(candidate).size();
         QString error;
         const bool started = StartWindowsUpdate(offer, candidate, error);
-        if (started && QString::fromLocal8Bit(argv[4]) == "hold") QThread::msleep(1800);
+        if (started && arguments.at(4) == "hold") QThread::msleep(1800);
         return started ? 0 : 2;
     }
     if (QFileInfo(QCoreApplication::applicationFilePath()).fileName() == "portable-current.exe") {
         QFile file("old-started.marker"); file.open(QIODevice::WriteOnly); file.write("restarted"); return 0;
     }
     check(argc == 2, "Candidate argument missing");
-    const auto candidate = QString::fromLocal8Bit(argv[1]);
+    const auto candidate = arguments.at(1);
     check(WindowsExecutableVersion(candidate) == "99.0.0", "Candidate version could not be read");
-    for (bool tamper : {false, true}) {
+    for (const QString mode : {QString("success"), QString("tamper"), QString("crash")}) {
+        const bool tamper = mode == "tamper", rollback = mode != "success";
         QTemporaryDir temp;
-        const auto directory = temp.filePath("portable app"); check(QDir().mkpath(directory), "Fixture directory unavailable");
+        const auto directory = temp.filePath(QString::fromUtf8("portable app \xe6\x97\xa5"));
+        check(QDir().mkpath(directory), "Fixture directory unavailable");
         const auto target = directory + "/portable-current.exe";
         check(QFile::copy(QCoreApplication::applicationFilePath(), target), "Fixture executable unavailable");
         const auto oldHash = UpdateFileHash(target), newHash = UpdateFileHash(candidate);
         const auto config = directory + "/desktop-profiles.json";
         QFile settings(config); check(settings.open(QIODevice::WriteOnly), "Fixture config unavailable"); settings.write("settings must survive"); settings.close();
+        if (mode == "crash") { QFile fail(directory + "/fail-start.marker"); check(fail.open(QIODevice::WriteOnly), "Crash fixture unavailable"); fail.write("fail"); }
         QProcess current;
         current.setWorkingDirectory(directory);
         current.start(target, {"--simulate-update", candidate, newHash, tamper ? "hold" : "exit"});
@@ -52,9 +56,9 @@ int main(int argc, char **argv) {
             QFile file(staged); check(file.open(QIODevice::Append), "Could not tamper with synthetic candidate"); file.write("tampered"); file.close();
         }
         check(current.waitForFinished(5000) && current.exitCode() == 0, "Update helper did not start");
-        check(waitFor(directory + (tamper ? "/old-started.marker" : "/update-installed.marker")), "Updated or retained app did not restart");
-        check(UpdateFileHash(target) == (tamper ? oldHash : newHash), "Update transaction installed the wrong bytes");
-        if (!tamper) check(UpdateFileHash(target + ".previous") == oldHash, "Previous executable was not kept");
+        check(waitFor(directory + (rollback ? "/old-started.marker" : "/update-installed.marker")), "Updated or retained app did not restart");
+        check(UpdateFileHash(target) == (rollback ? oldHash : newHash), "Update transaction installed the wrong bytes");
+        if (!rollback) check(UpdateFileHash(target + ".previous") == oldHash, "Previous executable was not kept");
         check(settings.open(QIODevice::ReadOnly) && settings.readAll() == "settings must survive", "Update touched configuration"); settings.close();
         QThread::msleep(250);
     }

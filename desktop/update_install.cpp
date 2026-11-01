@@ -21,6 +21,25 @@ void Result(const QString &message) {
     QSettings settings("LGInputSwitch", "LGInputSwitchDesktop");
     settings.setValue("updates/result", message); settings.sync();
 }
+void RememberCleanup(const QString &prefix) {
+    QSettings settings("LGInputSwitch", "LGInputSwitchDesktop");
+    settings.setValue("updates/cleanup", QStringList{prefix + "-helper.exe", prefix + "-new.exe",
+                                                  prefix + ".json", prefix + ".json.ready", prefix + ".json.started"});
+    settings.sync();
+}
+}
+void CleanupWindowsUpdateFiles() {
+    QSettings settings("LGInputSwitch", "LGInputSwitchDesktop");
+    const auto parent = QFileInfo(QCoreApplication::applicationFilePath()).absolutePath();
+    QStringList remaining;
+    for (const auto &path : settings.value("updates/cleanup").toStringList()) {
+        const QFileInfo info(path);
+        if (info.absolutePath() != parent || info.isSymLink() ||
+            !QRegularExpression("^\\.lginputswitch-update-[0-9a-f-]{36}(-helper\\.exe|-new\\.exe|\\.json|\\.json\\.ready|\\.json\\.started)$")
+                 .match(info.fileName()).hasMatch()) continue;
+        if (info.exists() && !QFile::remove(path)) remaining.push_back(path);
+    }
+    settings.setValue("updates/cleanup", remaining); settings.sync();
 }
 QString WindowsExecutableVersion(const QString &path) {
     DWORD unused = 0;
@@ -35,7 +54,10 @@ QString WindowsExecutableVersion(const QString &path) {
 }
 bool StartWindowsUpdate(const UpdateOffer &offer, const QString &download, QString &error) {
     if (!VerifyUpdateFile(download, offer.sha256, offer.size, error)) return false;
-    if (WindowsExecutableVersion(download) != offer.version) { error = "The executable version does not match this release."; return false; }
+    if (WindowsExecutableVersion(download) != offer.version ||
+        QVersionNumber::fromString(offer.version) <= QVersionNumber::fromString(WindowsExecutableVersion(QCoreApplication::applicationFilePath()))) {
+        error = "The executable version is not the announced newer release."; return false;
+    }
     const auto target = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
     const auto directory = QFileInfo(target).absolutePath();
     QTemporaryFile writable(directory + "/.lginputswitch-write-XXXXXX");
@@ -59,7 +81,15 @@ bool StartWindowsUpdate(const UpdateOffer &offer, const QString &download, QStri
         QFile::remove(staged); QFile::remove(helper); QFile::remove(plan);
         error = "Could not start the update helper. The installed app is unchanged."; return false;
     }
-    return true;
+    RememberCleanup(prefix);
+    // Do not close the app until the owned helper has validated its plan.
+    for (int i = 0; i < 250; ++i) {
+        if (QFileInfo::exists(plan + ".started")) return true;
+        QThread::msleep(20);
+    }
+    QFile::remove(plan); // A late helper must not install after reporting failure.
+    error = "The update helper did not become ready. The running app was kept open.";
+    return false;
 }
 int ApplyWindowsUpdate(const QString &planPath) {
     const auto helper = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
@@ -76,6 +106,7 @@ int ApplyWindowsUpdate(const QString &planPath) {
         QFileInfo(target).absolutePath() != parent || !target.endsWith(".exe", Qt::CaseInsensitive) ||
         QFileInfo(target).fileName().startsWith('.') || target == helper || QFileInfo(target).isSymLink() ||
         !ValidUpdateVersion(plan["version"].toString())) return 2;
+    RememberCleanup(prefix);
     QLockFile lock(parent + "/.lginputswitch-update.lock");
     if (!lock.tryLock()) return 3;
     bool pidOk = false; const auto pid = plan["pid"].toString().toUInt(&pidOk);
@@ -86,13 +117,17 @@ int ApplyWindowsUpdate(const QString &planPath) {
         const bool same = QueryFullProcessImageNameW(process, 0, image, &count) &&
             QFileInfo(QString::fromWCharArray(image, count)).canonicalFilePath() == target &&
             Creation(process) == plan["creation"].toString();
-        const auto waited = same ? WaitForSingleObject(process, 60000) : WAIT_FAILED;
+        QSaveFile ready(planPath + ".started");
+        const bool signalled = same && ready.open(QIODevice::WriteOnly) && ready.write("started") == 7 && ready.commit();
+        const auto waited = signalled ? WaitForSingleObject(process, 60000) : WAIT_FAILED;
         CloseHandle(process);
         if (!same || waited != WAIT_OBJECT_0) return 3;
-    } else if (GetLastError() != ERROR_INVALID_PARAMETER) return 3;
+    } else return 3;
+    if (!QFileInfo::exists(planPath)) return 3;
     QString error;
     const auto expectedSize = plan["size"].toString().toLongLong();
-    if (UpdateFileHash(target) != plan["old_sha256"].toString() ||
+    if (UpdateFileHash(helper) != plan["old_sha256"].toString() ||
+        UpdateFileHash(target) != plan["old_sha256"].toString() ||
         !VerifyUpdateFile(staged, plan["sha256"].toString(), expectedSize, error) ||
         WindowsExecutableVersion(staged) != plan["version"].toString()) {
         Result("Update verification failed. The previous app was kept."); Restart(target); return 4;
@@ -102,20 +137,40 @@ int ApplyWindowsUpdate(const QString &planPath) {
         Result("Update could not replace the executable. " + WinError()); Restart(target); return 5;
     }
     if (!Move(staged, target, false)) {
-        Move(backup, target, false); Result("Update failed; the previous executable was restored."); Restart(target); return 6;
+        const bool restored = Move(backup, target, false);
+        Result(restored ? "Update failed; the previous executable was restored."
+                        : "Update failed. Restore the .previous executable in the app folder.");
+        if (restored) Restart(target);
+        else MessageBoxW(nullptr, L"Restore the .previous executable in the app folder.", L"LG Input Switch", MB_OK | MB_ICONERROR);
+        return 6;
     }
-    if (!Restart(target)) {
-        QFile::remove(target); Move(backup, target, false);
-        Result("The new executable could not start; the previous executable was restored."); Restart(target); return 7;
+    qint64 newPid = 0;
+    const bool launched = QProcess::startDetached(target, {"--update-ready", planPath}, parent, &newPid);
+    HANDLE restarted = launched ? OpenProcess(SYNCHRONIZE, FALSE, DWORD(newPid)) : nullptr;
+    bool healthy = false, exited = !launched;
+    for (int i = 0; launched && i < 200; ++i) {
+        if (QFileInfo::exists(planPath + ".ready")) { healthy = true; break; }
+        if (restarted && WaitForSingleObject(restarted, 0) == WAIT_OBJECT_0) { exited = true; break; }
+        QThread::msleep(50);
     }
-    Result("Updated to " + plan["version"].toString() + ". The previous executable is retained as .previous.");
-    QFile::remove(planPath);
-    // Windows removes the old helper after its process has exited; schedule it.
-    MoveFileExW(reinterpret_cast<LPCWSTR>(helper.utf16()), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+    if (restarted) CloseHandle(restarted);
+    if (!healthy && exited) {
+        QFile::remove(target);
+        const bool restored = Move(backup, target, false);
+        Result(restored ? "The new app did not start; the previous executable was restored."
+                        : "The new app did not start. Restore the .previous executable in the app folder.");
+        if (restored) Restart(target);
+        else MessageBoxW(nullptr, L"Update recovery needs attention. Restore the .previous executable in the app folder.", L"LG Input Switch", MB_OK | MB_ICONERROR);
+        return 7;
+    }
+    Result("Updated to " + plan["version"].toString() +
+           (healthy ? ". The previous executable is retained as .previous."
+                    : ". Startup confirmation timed out; the .previous executable is available for recovery."));
     return 0;
 }
 #else
 QString WindowsExecutableVersion(const QString &) { return {}; }
 bool StartWindowsUpdate(const UpdateOffer &, const QString &, QString &error) { error = "Windows updates are unavailable on this platform."; return false; }
 int ApplyWindowsUpdate(const QString &) { return 2; }
+void CleanupWindowsUpdateFiles() {}
 #endif
