@@ -25,7 +25,7 @@ class ReleasePackaging(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             fixtures = {
-                'windows': ['LGInputSwitch-1.1.0-Windows-x64.zip',
+                'windows': ['LGInputSwitch-1.1.0-Windows-x64.exe',
                             'LGInputSwitch-1.1.0-Windows-legacy-x64.zip',
                             'LGInputSwitch-1.1.0-source.tar.gz',
                             'qtbase-everywhere-src-6.8.3.tar.xz',
@@ -62,7 +62,10 @@ class ReleasePackaging(unittest.TestCase):
                 returncode = 1
             with patch.object(publisher, 'run', fake_run), patch.object(publisher.subprocess, 'run', return_value=MissingRelease()), patch.dict(os.environ, {'GITHUB_SHA':'fixture','GITHUB_REPOSITORY':'owner/repo'}):
                 publisher.publish(root, '1.1.0')
-            self.assertEqual((root / 'publish/SOURCE_REVISION').read_bytes(), b'fixture\n')
+            self.assertEqual({p.name for p in (root / 'publish').iterdir()},
+                             {'LGInputSwitch-1.1.0-Windows-x64.exe',
+                              'lginputswitch-1.1.0-1-x86_64.pkg.tar.zst', 'SHA256SUMS'})
+            self.assertEqual(len((root / 'publish/SHA256SUMS').read_text().splitlines()), 2)
             self.assertTrue(any('--prerelease=false' in call and '--latest' in call for call in calls))
 
     def test_numeric_versions_match_source(self):
@@ -93,17 +96,45 @@ class ReleasePackaging(unittest.TestCase):
             with tarfile.open(root / 'source.tar.xz', 'w:xz') as archive:
                 for name in ['qtbase/LICENSES/LGPL-3.0-only.txt', 'qtbase/LICENSES/GPL-3.0-only.txt',
                              'qtbase/src/3rdparty/library/FTL.TXT']:
-                    value = b'fixture license'; entry = tarfile.TarInfo(name); entry.size = len(value)
+                    value = b'GNU LESSER GENERAL PUBLIC LICENSE GNU GENERAL PUBLIC LICENSE'; entry = tarfile.TarInfo(name); entry.size = len(value)
                     archive.addfile(entry, io.BytesIO(value))
             with patch.object(windows, 'QT', {'sources':[{'name':'source.tar.xz'}]}):
-                windows.collect_notices(root, root / 'notices')
-                self.assertTrue((root / 'notices/LGPL-3.0-only.txt').exists())
-                self.assertTrue((root / 'notices/qtbase/src/3rdparty/library/FTL.TXT').exists())
+                notices = windows.collect_notices(root)
+                self.assertIn('LGPL-3.0-only.txt', notices)
+                self.assertIn('qtbase/src/3rdparty/library/FTL.TXT', notices)
                 with tarfile.open(root / 'source.tar.xz', 'w:xz') as archive:
                     entry = tarfile.TarInfo('../outside'); entry.size = 1
                     archive.addfile(entry, io.BytesIO(b'x'))
                 with self.assertRaisesRegex(RuntimeError, 'Unsafe'):
-                    windows.collect_notices(root, root / 'unsafe')
+                    windows.collect_notices(root)
+
+    def test_portable_package_contains_only_executable_and_internal_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / 'app.exe'; executable.write_bytes(b'MZ' + b'x' * 2048)
+            output = root / 'release'
+            with patch.object(windows.subprocess, 'check_output', return_value='fixture\n'):
+                windows.package(executable, output)
+            expected = f'LGInputSwitch-{windows.VERSION}-Windows-x64.exe'
+            self.assertEqual({p.name for p in output.iterdir()}, {expected, 'SOURCE_REVISION', 'SHA256SUMS-Windows'})
+            self.assertEqual((output / expected).read_bytes(), executable.read_bytes())
+            self.assertEqual((output / 'SHA256SUMS-Windows').read_text(),
+                hashlib.sha256(executable.read_bytes()).hexdigest() + '  ' + expected + '\n')
+
+    def test_unchecked_release_executable_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); folder = root / 'windows'; folder.mkdir()
+            (folder / 'SOURCE_REVISION').write_text('fixture\n')
+            (folder / 'LGInputSwitch-1.1.0-Windows-x64.exe').write_bytes(b'unchecked')
+            (folder / 'SHA256SUMS-Windows').write_text('')
+            def fake_run(*args):
+                if args[0] == 'git': return 'fixture\n'
+                if args[:2] == ('gh', 'api'): return '[[]]'
+                self.fail('Unchecked asset reached publication')
+            with patch.object(publisher, 'run', fake_run), patch.dict(os.environ,
+                    {'GITHUB_SHA':'fixture', 'GITHUB_REPOSITORY':'owner/repo'}):
+                with self.assertRaisesRegex(ValueError, 'missing or unchecked'):
+                    publisher.publish(root, '1.1.0')
 
     def test_corrupt_artifact_never_reaches_release_creation(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,3 +1,4 @@
+#include "updates.h"
 #include "../core/input_value.h"
 #include "diagnostics.h"
 #include "kde_shortcuts.h"
@@ -1835,6 +1836,29 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto *aboutQt = new QPushButton("About Qt");
         connect(aboutQt, &QPushButton::clicked, this, [this] { QMessageBox::aboutQt(this); });
         form->addRow(aboutQt);
+#ifdef LG_DESKTOP_TEST
+        auto *updates = new UpdatePanel(true, this);
+#else
+        auto *updates = new UpdatePanel(preview_, this);
+#endif
+        form->addRow(updates);
+        updates->notify = [this](const QString &text) {
+            if (config_.notifications && tray_ && tray_->isVisible())
+                tray_->showMessage("LG Input Switch", text, QSystemTrayIcon::Information, 10000);
+        };
+        updates->prepareInstall = [this] {
+            if (busy_) { message("Wait for the current monitor operation to finish before updating."); return false; }
+            captureDraft();
+            if (dirty_) {
+                const auto choice = QMessageBox::question(this, "Install update", "Save your changes before updating?",
+                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+                if (choice == QMessageBox::Cancel) return false;
+                if (choice == QMessageBox::Save) { save(); if (dirty_) return false; }
+                else dirty_ = false;
+            }
+            return true;
+        };
+        updates->quitForUpdate = [this] { quitting_ = true; qApp->quit(); };
         tabs_->addTab(scrollPage(preferences, "preferencesScroll"), "Preferences");
         auto *advanced = new QFrame;
         advanced->setObjectName("card");
@@ -2198,10 +2222,26 @@ int main(int argc, char **argv)
         return 0;
     }
 #endif
+#ifdef Q_OS_WIN
+    if (argc == 3 && std::strcmp(argv[1], "--apply-update") == 0) {
+        QCoreApplication helper(argc, argv);
+        return ApplyWindowsUpdate(QString::fromLocal8Bit(argv[2]));
+    }
+#else
+    char backgroundArgument[] = "--background";
+    if (argc == 3 && std::strcmp(argv[1], "--restart-after") == 0) {
+        bool valid = false; const auto parent = QString::fromLocal8Bit(argv[2]).toLongLong(&valid);
+        if (!valid || parent <= 0) return 2;
+        for (int wait = 0; wait < 300 && QFileInfo::exists("/proc/" + QString::number(parent)); ++wait)
+            QThread::msleep(100);
+        if (QFileInfo::exists("/proc/" + QString::number(parent))) return 3;
+        argv[1] = backgroundArgument; argc = 2;
+    }
+#endif
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
-    app.setApplicationVersion("1.3.1");
+    app.setApplicationVersion("1.3.2");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
@@ -2209,10 +2249,22 @@ int main(int argc, char **argv)
     parser.setApplicationDescription("LG monitor input switching with a tray and global shortcuts.");
     parser.addHelpOption();
     parser.addVersionOption();
+#ifdef LG_EMBEDDED_DISTRIBUTION
+    parser.addOption({"licenses", "Export embedded license texts, source links and rebuild instructions.", "file"});
+#endif
     parser.addOption({"preview", "Show synthetic data without accessing settings or hardware."});
     parser.addOption({"background", "Start in the tray when a tray host is available."});
     parser.addOption({"screenshot-dir", "Render design previews (requires --preview).", "directory"});
     parser.process(app);
+#ifdef LG_EMBEDDED_DISTRIBUTION
+    if (parser.isSet("licenses")) {
+        QFile source(":/distribution/THIRD-PARTY-NOTICES.txt");
+        QSaveFile destination(parser.value("licenses"));
+        if (!source.open(QIODevice::ReadOnly) || !destination.open(QIODevice::WriteOnly)) return 2;
+        const auto data = source.readAll();
+        return destination.write(data) == data.size() && destination.commit() ? 0 : 3;
+    }
+#endif
     const bool preview = parser.isSet("preview");
     if (parser.isSet("screenshot-dir") && !preview)
         parser.showHelp(2);

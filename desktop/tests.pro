@@ -12,3 +12,6 @@ unix:!macx:exists(/usr/include/KF6/KGlobalAccel/KGlobalAccel) {
 SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp
 
 SOURCES += monitor_inputs.cpp
+
+QT += network
+SOURCES += update_policy.cpp update_install.cpp updates.cpp

@@ -1,7 +1,37 @@
 {
   "version": "6.8.3",
   "sources": [
-    {"name": "qtbase-everywhere-src-6.8.3.tar.xz", "sha256": "56001b905601bb9023d399f3ba780d7fa940f3e4861e496a7c490331f49e0b80"},
-    {"name": "qtsvg-everywhere-src-6.8.3.tar.xz", "sha256": "35eb516460f00f264eb504baa253432384351cf23fb9980a5857190e8deef438"}
+    {
+      "name": "qtbase-everywhere-src-6.8.3.tar.xz",
+      "sha256": "56001b905601bb9023d399f3ba780d7fa940f3e4861e496a7c490331f49e0b80",
+      "url": "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.tar.xz"
+    }
+  ],
+  "configure_args": [
+    "-static",
+    "-static-runtime",
+    "-release",
+    "-opensource",
+    "-confirm-license",
+    "-optimize-size",
+    "-nomake",
+    "examples",
+    "-nomake",
+    "tests",
+    "-no-opengl",
+    "-no-feature-vulkan",
+    "-schannel",
+    "-no-openssl",
+    "-no-feature-sql",
+    "-no-feature-dbus",
+    "-no-feature-testlib",
+    "-qt-zlib",
+    "-qt-libpng",
+    "-qt-libjpeg",
+    "-qt-pcre",
+    "-qt-freetype",
+    "-qt-harfbuzz",
+    "-no-feature-zstd",
+    "-no-feature-brotli"
   ]
 }
