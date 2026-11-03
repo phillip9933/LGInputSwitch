@@ -1,7 +1,7 @@
 # Windows portable app
 
-Download `LGInputSwitch-1.3.2-Windows-x64.exe` from the
-[1.3.2 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.2),
+Download `LGInputSwitch-1.3.3-Windows-x64.exe` from the
+[1.3.3 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.3),
 put it in a writable folder and run it. There is no installer, Qt DLL folder or
 separate Microsoft runtime setup. Windows switching still requires an AMD GPU.
 
@@ -43,7 +43,7 @@ The executable embeds the project/dependency license texts, attribution, source
 links, checksums and rebuild instructions. Export them to a text file with:
 
 ```
-LGInputSwitch-1.3.2-Windows-x64.exe --licenses notices.txt
+LGInputSwitch-1.3.3-Windows-x64.exe --licenses notices.txt
 ```
 
 Project code is AGPL-3.0-or-later; Qt uses LGPLv3 and bundled third-party terms
