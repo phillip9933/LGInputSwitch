@@ -24,6 +24,7 @@ struct DesktopMonitor
     int adapter = -1, display = -1;
     bool bus = false;
     QString identity;
+    QString inputProfile; // live hardware identification; not restored from saved names/routes
 };
 struct Discovery
 {

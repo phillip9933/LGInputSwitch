@@ -1,6 +1,7 @@
 #include "monitor_inputs.h"
 #include "../core/input_value.h"
 #include "diagnostics.h"
+#include "input_models.h"
 #include "process.h"
 #ifdef Q_OS_WIN
 #include "../platform/windows/adl_session.h"
@@ -68,7 +69,7 @@ bool IsPresetInputList(const SavedMonitor &monitor)
 {
     if (monitor.inputs.isEmpty())
         return true;
-    const auto defaults = DefaultMonitorInputs(monitor.method);
+    const auto defaults = DefaultMonitorInputs(monitor.method, monitor.route.inputProfile);
     for (const auto &input : monitor.inputs)
     {
         unsigned int value;
@@ -80,7 +81,7 @@ bool IsPresetInputList(const SavedMonitor &monitor)
     }
     return true;
 }
-MonitorInputRead InputsFromCapabilities(const SavedMonitor &m, const QJsonObject &caps)
+static MonitorInputRead AdvertisedMonitorInputs(const SavedMonitor &m, const QJsonObject &caps)
 {
     MonitorInputRead result;
     if (!caps["read"].toBool() || caps["parse_status"] != "parsed")
@@ -171,6 +172,43 @@ MonitorInputRead InputsFromCapabilities(const SavedMonitor &m, const QJsonObject
     }
     result.status = derived ? "Inputs read from the monitor; configured LG alternate codes retained."
                             : "Inputs read from this monitor’s advertised capabilities.";
+    return result;
+}
+MonitorInputRead InputsFromCapabilities(const SavedMonitor &m, const QJsonObject &caps)
+{
+    auto result = AdvertisedMonitorInputs(m, caps);
+    const bool thunderbolt = m.method == "lg" &&
+        (m.route.inputProfile == Lg40U990AInputProfile ||
+         (caps["read"].toBool() && caps["parse_status"] == "parsed" &&
+          caps["input_profile"] == Lg40U990AInputProfile));
+    if (!thunderbolt)
+        return result;
+    // This model's tested 0xD2 port may be omitted from capabilities altogether.
+    // An unavailable/incomplete list must not discard any existing inputs.
+    const bool advertised = result.complete;
+    if (!advertised)
+        result.inputs = m.inputs;
+    if (!ByValue(result.inputs, 0xd2))
+    {
+        if (result.inputs.size() >= 64)
+        {
+            result.complete = false;
+            result.status = "Thunderbolt detected; input limit reached. Existing mappings kept.";
+            return result;
+        }
+        result.inputs.push_back({"Thunderbolt", "0xd2", {}, true, {}});
+    }
+    for (auto &input : result.inputs)
+    {
+        unsigned int value;
+        if (Value(input.code, value) && value == 0xd2 &&
+            (input.label.isEmpty() || input.label.startsWith("Input 0x")))
+            input.label = "Thunderbolt";
+    }
+    result.complete = true;
+    result.status = advertised
+        ? "Inputs read; Thunderbolt (0xD2) added from the LG 40U990A-W model profile."
+        : "LG 40U990A-W model profile: Thunderbolt (0xD2) available; existing inputs kept.";
     return result;
 }
 QJsonObject ReadMonitorCapabilities(const DesktopMonitor &target)

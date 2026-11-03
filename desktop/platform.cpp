@@ -186,19 +186,23 @@ Discovery DiscoverDesktopMonitors()
                     info[j].displayID.iDisplayLogicalAdapterIndex != adapter.iAdapterIndex)
                     continue;
                 const int display = info[j].displayID.iDisplayLogicalIndex;
-                QString identity;
+                QString identity, inputProfile;
                 if (Adl().edid)
                 {
                     ADLDisplayEDIDData data{};
                     data.iSize = sizeof(data);
                     if (Adl().edid(adapter.iAdapterIndex, display, &data) == ADL_OK &&
                         data.iEDIDSize >= 128 && data.iEDIDSize <= ADL_MAX_EDIDDATA_SIZE)
-                        identity = MonitorIdentity(QByteArray(data.cEDIDData, data.iEDIDSize));
+                    {
+                        const QByteArray edid(data.cEDIDData, data.iEDIDSize);
+                        identity = MonitorIdentity(edid);
+                        inputProfile = MonitorInputProfileFromEdid(edid);
+                    }
                 }
                 result.monitors.push_back(
                     {QString::fromLocal8Bit(info[j].strDisplayName) +
                          QString(" · Adapter %1 / Display %2").arg(adapter.iAdapterIndex).arg(display),
-                     adapter.iAdapterIndex, display, false, identity});
+                     adapter.iAdapterIndex, display, false, identity, inputProfile});
             }
         if (info)
             ReleaseAdlMemory(reinterpret_cast<void **>(&info));
@@ -231,9 +235,15 @@ Discovery DiscoverDesktopMonitors()
                 QFile edid(path + "/edid");
                 if (edid.open(QIODevice::ReadOnly))
                 {
-                    const auto identity = MonitorIdentity(edid.read(128));
+                    const auto bytes = edid.read(128);
+                    const auto identity = MonitorIdentity(bytes);
                     if (!identity.isEmpty())
+                    {
                         monitor.identity = identity;
+                        const auto profile = MonitorInputProfileFromEdid(bytes);
+                        if (!profile.isEmpty())
+                            monitor.inputProfile = profile;
+                    }
                 }
             }
     if (probe.status != "finished" || probe.exitCode != 0)

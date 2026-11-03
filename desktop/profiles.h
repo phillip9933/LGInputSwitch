@@ -35,7 +35,7 @@ struct DesktopWorkspace
     QString activeProfile;
 };
 QString NewDesktopId();
-QVector<DesktopInput> DefaultMonitorInputs(const QString &method);
+QVector<DesktopInput> DefaultMonitorInputs(const QString &method, const QString &inputProfile = {});
 DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy);
 QJsonObject WorkspaceJson(const DesktopWorkspace &workspace);
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &workspace, QString &error);
@@ -49,6 +49,7 @@ const MonitorProfile *FindProfile(const DesktopWorkspace &workspace, const QStri
 const DesktopInput *FindMonitorInput(const SavedMonitor &monitor, const QString &id);
 QString MonitorRouteKey(const DesktopMonitor &monitor);
 QString MonitorIdentity(const QByteArray &edid);
+QString MonitorInputProfileFromEdid(const QByteArray &edid);
 Discovery ParseDesktopDiscovery(const QByteArray &output);
 // Unique fingerprints may follow changed native indices. Missing/duplicate
 // fingerprints require explicit selection; session confirmations never override

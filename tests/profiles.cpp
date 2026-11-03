@@ -1,6 +1,7 @@
 #include "../desktop/profiles.h"
 #include "../desktop/diagnostics.h"
 #include "../desktop/monitor_inputs.h"
+#include "../desktop/input_models.h"
 #include <QApplication>
 #include <iostream>
 
@@ -117,6 +118,130 @@ static void automaticInputs()
     tooMany += ")))";
     check(!InputsFromCapabilities(generic, caps(tooMany)).complete, "Oversized input list was applied");
 }
+static void thunderboltInputs()
+{
+    auto caps = [](const QByteArray &text) {
+        auto value = ParseDiagnosticCapabilities(text);
+        value["read"] = true;
+        return value;
+    };
+    auto edid = [](const QByteArray &model, unsigned int manufacturer = 0x1e6d) {
+        QByteArray bytes(128, '\0');
+        bytes.replace(0, 8, QByteArray::fromHex("00ffffffffffff00"));
+        bytes[8] = char(manufacturer >> 8);
+        bytes[9] = char(manufacturer & 0xff);
+        bytes.replace(54, 5, QByteArray::fromHex("000000fc00"));
+        bytes.replace(59, 13, model.leftJustified(13, ' '));
+        unsigned int sum = 0;
+        for (int i = 0; i < 127; ++i)
+            sum += static_cast<unsigned char>(bytes[i]);
+        bytes[127] = char(-sum);
+        return bytes;
+    };
+    check(MonitorInputProfileFromEdid(edid("40U990A-W\n")) == Lg40U990AInputProfile &&
+              MonitorInputProfileFromEdid(edid("40U990A", 0x30e4)) == Lg40U990AInputProfile,
+          "LG EDID model descriptor did not select the Thunderbolt profile");
+    auto corrupt = edid("40U990A-W");
+    corrupt[127] = char(corrupt[127] + 1);
+    check(MonitorInputProfileFromEdid(corrupt).isEmpty() &&
+              MonitorInputProfileFromEdid(edid("40U990A-W", 0x10ac)).isEmpty() &&
+              MonitorInputProfileFromEdid(edid("40U990B-W")).isEmpty() &&
+              MonitorInputProfileFromEdid(QByteArray()).isEmpty(),
+          "Invalid EDID or a different manufacturer/model selected the Thunderbolt profile");
+    const auto discovery = ParseDesktopDiscovery(
+        "Display 1\n I2C bus: /dev/i2c-5\n Monitor: GSM:40U990A:synthetic-one\n"
+        "Display 2\n I2C bus: /dev/i2c-6\n Model: LG 40U990A-W\n"
+        "Display 3\n I2C bus: /dev/i2c-7\n Model: 40U990B-W\n");
+    check(discovery.monitors.size() == 3 &&
+              discovery.monitors[0].inputProfile == Lg40U990AInputProfile &&
+              discovery.monitors[1].inputProfile == Lg40U990AInputProfile &&
+              discovery.monitors[2].inputProfile.isEmpty(),
+          "Linux discovery selected the wrong monitor input profile");
+    const auto defaults = DefaultMonitorInputs("lg", Lg40U990AInputProfile);
+    check(defaults.size() == 5 && defaults[1].code == "0xD1" &&
+              defaults[4].label == "Thunderbolt" && defaults[4].code == "0xD2" &&
+              !defaults[4].id.isEmpty() && defaults[4].shortcut.isEmpty() &&
+              DefaultMonitorInputs("lg").size() == 4 &&
+              DefaultMonitorInputs("standard", Lg40U990AInputProfile).size() == 4,
+          "Model presets replaced USB-C or applied LG Thunderbolt to unrelated methods/models");
+
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &monitor = w.monitors[0];
+    const auto monitorId = monitor.id;
+    // A user-editable name is deliberately insufficient for model selection.
+    monitor.name = monitor.route.label = "LG 40U990A-W";
+    check(!InputsFromCapabilities(monitor, {{"read", false}}).complete,
+          "Saved monitor name was trusted as hardware model identification");
+    monitor.route = discovery.monitors[0];
+    monitor.identity = monitor.route.identity;
+    monitor.inputs[1].label = "My USB-C laptop";
+    const auto usbId = monitor.inputs[1].id;
+    const auto actionId = w.profiles[0].actions[1].id;
+    const auto shortcut = w.profiles[0].actions[1].shortcut;
+    const auto fallback = InputsFromCapabilities(monitor, {{"read", false}});
+    check(fallback.complete && fallback.inputs.size() == 5 &&
+              ApplyMonitorInputs(w, monitorId, fallback),
+          "Known model did not gain Thunderbolt when capabilities were unavailable");
+    check(monitor.inputs[1].id == usbId && monitor.inputs[1].code == "0xD1" &&
+              monitor.inputs[1].label == "My USB-C laptop" &&
+              w.profiles[0].actions[1].id == actionId &&
+              w.profiles[0].actions[1].shortcut == shortcut &&
+              w.profiles[0].actions[1].inputs.value(monitorId) == usbId,
+          "Adding Thunderbolt damaged an existing input, action or shortcut");
+    const auto &action = w.profiles[0].actions.back();
+    check(action.name == "Thunderbolt" && action.shortcut.isEmpty() && action.enabled &&
+              FindMonitorInput(monitor, action.inputs.value(monitorId))->code == "0xd2",
+          "Single-monitor profile did not gain a separate Thunderbolt action");
+    const auto persisted = WorkspaceJson(w);
+    check(!ApplyMonitorInputs(w, monitorId, InputsFromCapabilities(monitor, {{"read", false}})) &&
+              WorkspaceJson(w) == persisted,
+          "Repeated model detection recreated Thunderbolt input/action IDs");
+    QString error;
+    DesktopWorkspace restored;
+    check(ValidateWorkspace(w, error) && ParseWorkspace(persisted, restored, error) &&
+              WorkspaceJson(restored) == persisted && restored.monitors[0].route.inputProfile.isEmpty(),
+          "Thunderbolt settings did not roundtrip or live model metadata was restored from disk");
+
+    int sent = 0;
+    const auto result = SendProfileAction(w, w.profiles[0].id, action.id, discovery, {}, {},
+        [&](const DesktopConfig &config, const QString &code) {
+            ++sent;
+            check(config.method == "lg" && config.source == "0x50" && code == "0xd2" &&
+                      config.display == 5 && config.bus,
+                  "Thunderbolt action sent the wrong method, source, input or target");
+            return lg::SwitchResult{lg::SwitchStatus::CommandSent, 0, "Synthetic send"};
+        });
+    check(result.complete() && sent == 1, "Thunderbolt action was not dispatched exactly once");
+
+    // Manual mode and an already-working custom D2 mapping must remain intact.
+    auto manual = restored;
+    manual.monitors[0].autoInputs = false;
+    manual.monitors[0].route = discovery.monitors[0];
+    const auto manualBefore = WorkspaceJson(manual);
+    check(!ApplyMonitorInputs(manual, monitorId, fallback) && WorkspaceJson(manual) == manualBefore,
+          "Thunderbolt model detection overwrote manual settings");
+    monitor.inputs.back().label = "Work laptop";
+    check(!ApplyMonitorInputs(w, monitorId, InputsFromCapabilities(monitor, {{"read", false}})) &&
+              monitor.inputs.back().label == "Work laptop",
+          "An existing custom Thunderbolt label was overwritten");
+
+    auto generic = MigrateDesktopConfig(DesktopConfig{}).monitors[0];
+    const auto standardList = caps("(model(40U990A)vcp(60(0F 10 11 12) F4))");
+    const auto detected = InputsFromCapabilities(generic, standardList);
+    check(detected.complete && detected.inputs.size() == 5 &&
+              detected.inputs[1].code == "0xd1" && detected.inputs.back().code == "0xd2",
+          "Capabilities model fallback failed to add a separate Thunderbolt port");
+    const auto direct = InputsFromCapabilities(generic, caps("(model(40U990A-W)vcp(F4(90 D0 D2)))"));
+    check(direct.complete && direct.inputs.size() == 3 && direct.inputs.back().label == "Thunderbolt",
+          "Advertised D2 was duplicated or left with a numeric label on the known model");
+    const auto other = InputsFromCapabilities(generic, caps("(model(40U990B-W)vcp(F4(D2)))"));
+    check(other.inputs.size() == 1 && other.inputs[0].label == "Input 0xd2",
+          "Thunderbolt code/name was applied to an unknown LG model");
+    generic.method = "standard";
+    const auto standard = InputsFromCapabilities(generic, standardList);
+    check(standard.complete && standard.inputs.size() == 4 && standard.inputs[0].code == "0x0f",
+          "LG Thunderbolt override changed standard DDC/CI inputs");
+}
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -126,6 +251,7 @@ int main(int argc, char **argv)
     check(temp.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temp.path());
     automaticInputs();
+    thunderboltInputs();
     DesktopConfig legacy;
     legacy.adapter = 4;
     legacy.display = 5;

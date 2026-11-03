@@ -28,6 +28,15 @@ int main(int argc, char **argv)
     Check(vendor.size() == 2 && vendor[0].toObject()["code"] == "0x90" &&
           !vendor[0].toObject().contains("standard_name"), "Vendor values were guessed or lost");
     Check(!QJsonDocument(caps).toJson().contains("PRIVATE"), "Raw capability identity leaked");
+    const auto knownModel = ParseDiagnosticCapabilities(
+        "(model(40U990A-W)serial(PRIVATE)vcp(60(0F 11) F4))");
+    Check(knownModel["input_profile"] == "lg-40u990a-w" &&
+              !QJsonDocument(knownModel).toJson().contains("PRIVATE") && !knownModel.contains("model"),
+          "Known model profile was lost or raw identity text was exported");
+    Check(!ParseDiagnosticCapabilities("(model(40U990A-W other PRIVATE)vcp(F4))")
+               .contains("input_profile") &&
+              ParseDiagnosticCapabilities("(model(40U990A-W)model(other)vcp(F4))")["parse_status"] != "parsed",
+          "Partial or ambiguous model name selected an input profile");
     const auto nested = ParseDiagnosticCapabilities("(model(PRIVATE vcp(60(11)))vcp(10 F4))");
     const auto nestedInputs = nested["advertised_input_values"].toObject();
     Check(nestedInputs["0x60"].toObject()["control_advertised"] == false &&
