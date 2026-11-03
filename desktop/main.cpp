@@ -4,6 +4,7 @@
 #include "kde_shortcuts.h"
 #include "monitor_inputs.h"
 #include "profiles.h"
+#include "windows_monitors.h"
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
 #endif
@@ -684,6 +685,12 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                        "depend on the monitor. After changing methods, review the codes or load presets; "
                        "custom LG codes are not translated automatically.");
         methodHint->setWordWrap(true);
+        const auto connection = ResolveSavedMonitor(next, discovery_, confirmed_);
+        if (connection.available && connection.target.transport == WindowsDdcTransport)
+            methodHint->setText("This connection supports standard DDC/CI (0x60). LG alternate switching "
+                "needs a custom source address that Windows DDC/CI cannot send through this connection. "
+                "To test standard switching, select Standard and load its method presets. "
+                "Some LG monitors only support alternate switching through a direct GPU connection.");
         form->addRow(methodHint);
         layout->addLayout(form);
         auto *automatic = new QCheckBox("Read and set up this monitor’s inputs automatically");
@@ -1326,11 +1333,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 c.method = m->method;
                 c.source = m->method == "standard" ? "0x51" : m->source;
                 c.inputs = m->inputs;
+                const auto route = resolution.available ? resolution.target : m->route;
+                c.transport = route.transport;
+                c.nativeDisplay = route.nativeDisplay;
+                c.targetIdentity = route.identity;
                 int index = -1;
                 for (int i = 0; i < draft_.monitors.size(); ++i)
                     if (draft_.monitors[i].id == id)
                         index = i;
-                snapshot.monitors.push_back({c, resolution.available, index});
+                snapshot.monitors.push_back({c, resolution.available, index, route.hardware,
+                                             route.inputProfile, m->autoInputs});
             }
         for (const auto &action : active().actions)
         {
@@ -2216,6 +2228,18 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 int main(int argc, char **argv)
 {
 #ifdef Q_OS_WIN
+    if ((argc == 2 && std::strcmp(argv[1], "--windows-discovery") == 0) ||
+        (argc == 4 && std::strcmp(argv[1], "--windows-input-probe") == 0) ||
+        (argc == 5 && std::strcmp(argv[1], "--windows-switch") == 0))
+    {
+        QCoreApplication app(argc, argv);
+        const auto arguments = app.arguments();
+        const auto result = argc == 2 ? ProbeNativeWindowsDiscovery()
+            : argc == 4 ? ProbeNativeWindowsCapabilities(arguments[2], arguments[3])
+                        : ProbeNativeWindowsSwitch(arguments[2], arguments[3], arguments[4]);
+        std::cout << QJsonDocument(result).toJson(QJsonDocument::Compact).constData();
+        return 0;
+    }
     if (argc == 5 && std::strcmp(argv[1], "--input-probe") == 0)
     {
         QCoreApplication app(argc, argv);

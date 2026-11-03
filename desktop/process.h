@@ -8,7 +8,7 @@ struct DesktopProcessResult
     QByteArray output;
 };
 
-// No shell or elevation. Used for discovery and explicit read-only diagnostics.
+// No shell or elevation. Used for discovery, diagnostics and explicit switch commands.
 inline DesktopProcessResult RunDesktopProcess(const QString &program, const QStringList &arguments,
                                                int timeoutMs, int outputLimit = 65536)
 {

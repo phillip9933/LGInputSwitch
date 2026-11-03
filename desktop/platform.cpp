@@ -2,6 +2,7 @@
 #include "../core/input_value.h"
 #include "process.h"
 #include "profiles.h"
+#include "windows_monitors.h"
 #ifdef Q_OS_WIN
 #include "../app/app_config.h"
 #include "../platform/windows/adl_session.h"
@@ -149,7 +150,7 @@ bool SaveDesktopConfig(const DesktopConfig &c, QString &error)
     return true;
 }
 
-Discovery DiscoverDesktopMonitors()
+static Discovery DiscoverPlatformMonitors()
 {
     Discovery result;
 #ifdef Q_OS_WIN
@@ -187,6 +188,7 @@ Discovery DiscoverDesktopMonitors()
                     continue;
                 const int display = info[j].displayID.iDisplayLogicalIndex;
                 QString identity, inputProfile;
+                QJsonObject hardware;
                 if (Adl().edid)
                 {
                     ADLDisplayEDIDData data{};
@@ -197,12 +199,15 @@ Discovery DiscoverDesktopMonitors()
                         const QByteArray edid(data.cEDIDData, data.iEDIDSize);
                         identity = MonitorIdentity(edid);
                         inputProfile = MonitorInputProfileFromEdid(edid);
+                        hardware = MonitorEdidHardware(edid);
                     }
                 }
-                result.monitors.push_back(
+                DesktopMonitor target =
                     {QString::fromLocal8Bit(info[j].strDisplayName) +
                          QString(" · Adapter %1 / Display %2").arg(adapter.iAdapterIndex).arg(display),
-                     adapter.iAdapterIndex, display, false, identity, inputProfile});
+                     adapter.iAdapterIndex, display, false, identity, inputProfile};
+                target.hardware = hardware;
+                result.monitors.push_back(target);
             }
         if (info)
             ReleaseAdlMemory(reinterpret_cast<void **>(&info));
@@ -240,6 +245,7 @@ Discovery DiscoverDesktopMonitors()
                     if (!identity.isEmpty())
                     {
                         monitor.identity = identity;
+                        monitor.hardware = MonitorEdidHardware(bytes);
                         const auto profile = MonitorInputProfileFromEdid(bytes);
                         if (!profile.isEmpty())
                             monitor.inputProfile = profile;
@@ -261,6 +267,22 @@ Discovery DiscoverDesktopMonitors()
     return result;
 }
 
+Discovery DiscoverDesktopMonitors()
+{
+    auto result = DiscoverPlatformMonitors();
+#ifdef Q_OS_WIN
+    // The native path does not depend on AMD initialization and is isolated in
+    // case a dock/display driver hangs while exposing its monitor information.
+    const auto probe = RunDesktopProcess(QCoreApplication::applicationFilePath(),
+                                         {"--windows-discovery"}, 15000, 262144);
+    if (probe.status == "finished" && probe.exitCode == 0)
+        result = MergeWindowsDiscovery(result, ParseNativeWindowsDiscovery(probe.output));
+    else
+        result.message += " Windows dock discovery " + probe.status + ".";
+#endif
+    return result;
+}
+
 lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
 {
     if (c.method != "lg" && c.method != "standard")
@@ -271,9 +293,30 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
         return {lg::SwitchStatus::InvalidArgument, 2, "Invalid monitor or input code."};
     const lg::InputCommand command{source, c.method == "standard" ? 0x60u : 0xf4u, value};
 #ifdef Q_OS_WIN
+    if (c.transport == WindowsDdcTransport)
+    {
+        // Validate the method before starting a child: never silently change an
+        // LG 0xF4/source-0x50 command into a standard 0x60 command.
+        if (c.method != "standard")
+            return DispatchNativeWindowsInput(c, code, {}, {});
+        const auto probe = RunDesktopProcess(QCoreApplication::applicationFilePath(),
+            {"--windows-switch", c.nativeDisplay, c.targetIdentity, code}, 10000);
+        if (probe.status != "finished" || probe.exitCode != 0)
+            return {lg::SwitchStatus::TransportFailure, probe.exitCode,
+                    ("Windows input command " + probe.status + "; physical switch unverified.").toStdString()};
+        const auto result = QJsonDocument::fromJson(probe.output).object();
+        if (!result.contains("sent") || !result.contains("native_code"))
+            return {lg::SwitchStatus::TransportFailure, -1, "Invalid Windows command result; physical switch unverified."};
+        return {result["sent"].toBool() ? lg::SwitchStatus::CommandSent : lg::SwitchStatus::TransportFailure,
+                result["native_code"].toInt(-1), result["detail"].toString().toStdString()};
+    }
+    if (!c.transport.isEmpty())
+        return {lg::SwitchStatus::InvalidArgument, 87, "Unknown monitor transport."};
     AdlTransport transport(c.adapter, c.display);
     return transport.Send(command);
 #else
+    if (!c.transport.isEmpty())
+        return {lg::SwitchStatus::InvalidArgument, 87, "This monitor connection is only supported on Windows."};
     DdcutilTransport transport(c.bus ? "--bus" : "--display", static_cast<unsigned int>(c.display));
     const auto arguments = transport.Arguments(command);
     if (arguments.empty())

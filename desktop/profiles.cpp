@@ -2,6 +2,7 @@
 #include "../core/input_value.h"
 #include "monitor_inputs.h"
 #include "input_models.h"
+#include "windows_monitors.h"
 #include <QKeySequence>
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
@@ -21,8 +22,14 @@ QJsonArray InputJson(const QVector<DesktopInput> &inputs)
 }
 QJsonObject RouteJson(const DesktopMonitor &route)
 {
-    return {
+    QJsonObject json = {
         {"adapter", route.adapter}, {"display", route.display}, {"bus", route.bus}, {"label", route.label}};
+    if (!route.transport.isEmpty())
+    {
+        json["transport"] = route.transport;
+        json["windowsDisplay"] = route.nativeDisplay;
+    }
+    return json;
 }
 QString Hash(const QByteArray &bytes)
 {
@@ -205,7 +212,10 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                     {"previousShortcut", p.previousShortcut}});
     }
     const auto &c = w.preferences;
-    return {{"version", 3},
+    bool native = false;
+    for (const auto &monitor : w.monitors)
+        native = native || monitor.route.transport == WindowsDdcTransport;
+    return {{"version", native ? 4 : 3},
             {"activeProfile", w.activeProfile},
             {"monitors", monitors},
             {"profiles", profiles},
@@ -243,6 +253,12 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             return fail("Saved monitors need unique names and IDs.");
         monitorIds.insert(m.id);
         names.insert(m.name);
+        if (!m.route.transport.isEmpty() && m.route.transport != WindowsDdcTransport)
+            return fail(m.name + ": unsupported monitor connection.");
+        if (m.route.transport == WindowsDdcTransport &&
+            (NativeWindowsDisplayNumber(m.route.nativeDisplay) < 0 || m.route.bus ||
+             m.route.adapter != -1 || m.route.display != NativeWindowsDisplayNumber(m.route.nativeDisplay)))
+            return fail(m.name + ": invalid Windows monitor connection.");
         if (!m.identity.isEmpty() && !QRegularExpression("^[0-9a-f]{64}$").match(m.identity).hasMatch())
             return fail("Invalid monitor fingerprint.");
         // A physical display has one saved definition, shared by all profiles.
@@ -329,7 +345,7 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &error)
 {
     error.clear();
-    if (json["version"].toInt(-1) != 2 && json["version"].toInt(-1) != 3)
+    if (!QList<int>{2, 3, 4}.contains(json["version"].toInt(-1)))
     {
         error = "Unsupported profile configuration version.";
         return false;
@@ -351,6 +367,13 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
         m.identity = j["identity"].toString();
         m.route = {r["label"].toString(), r["adapter"].toInt(-1), r["display"].toInt(-1), r["bus"].toBool(),
                    m.identity};
+        m.route.transport = r["transport"].toString();
+        m.route.nativeDisplay = r["windowsDisplay"].toString();
+        if (!m.route.transport.isEmpty() && json["version"].toInt() < 4)
+        {
+            error = "Native Windows monitor connections require profile configuration version 4.";
+            return false;
+        }
         m.source = j["source"].toString();
         m.method = j["method"].toString("lg");
         for (auto input : j["inputs"].toArray())
@@ -472,37 +495,9 @@ bool SaveDesktopWorkspace(const DesktopWorkspace &w, QString &error, const QStri
 }
 QString MonitorRouteKey(const DesktopMonitor &m)
 {
+    if (m.transport == WindowsDdcTransport)
+        return QString(WindowsDdcTransport) + ':' + m.nativeDisplay;
     return QString("%1:%2:%3").arg(m.adapter).arg(m.display).arg(m.bus);
-}
-QString MonitorIdentity(const QByteArray &edid)
-{
-    if (edid.size() < 128 || edid.left(8) != QByteArray::fromHex("00ffffffffffff00"))
-        return {};
-    unsigned int sum = 0;
-    for (int i = 0; i < 128; ++i)
-        sum += static_cast<unsigned char>(edid[i]);
-    if ((sum & 0xff) != 0)
-        return {};
-    // Base block contains model/serial. Ignore mutable extension blocks.
-    return Hash(edid.left(128));
-}
-QString MonitorInputProfileFromEdid(const QByteArray &edid)
-{
-    if (MonitorIdentity(edid).isEmpty())
-        return {};
-    const unsigned int manufacturer = (static_cast<unsigned char>(edid[8]) << 8) |
-                                      static_cast<unsigned char>(edid[9]);
-    if (manufacturer != 0x1e6d && manufacturer != 0x30e4) // GSM / LGD
-        return {};
-    for (int offset = 54; offset <= 108; offset += 18)
-        if (edid.mid(offset, 5) == QByteArray::fromHex("000000fc00"))
-        {
-            const auto profile = KnownMonitorInputProfile(
-                QString::fromLatin1(edid.mid(offset + 5, 13)));
-            if (!profile.isEmpty())
-                return profile;
-        }
-    return {};
 }
 Discovery ParseDesktopDiscovery(const QByteArray &output)
 {
@@ -559,7 +554,7 @@ MonitorResolution ResolveSavedMonitor(const SavedMonitor &m, const Discovery &d,
     {
         QVector<DesktopMonitor> matches;
         for (const auto &candidate : d.monitors)
-            if (candidate.identity == m.identity)
+            if (candidate.identity == m.identity && candidate.transport == m.route.transport)
                 matches.push_back(candidate);
         if (matches.size() == 1)
             return {true, matches.front(), {}};
@@ -649,6 +644,9 @@ ProfileSwitchResult SendProfileAction(const DesktopWorkspace &w, const QString &
         entry.target.adapter = resolution.target.adapter;
         entry.target.display = resolution.target.display;
         entry.target.bus = resolution.target.bus;
+        entry.target.transport = resolution.target.transport;
+        entry.target.nativeDisplay = resolution.target.nativeDisplay;
+        entry.target.targetIdentity = resolution.target.identity;
         entry.attempted = true;
         entry.result = sender(entry.target, input->code);
         entry.status = entry.result.sent()
@@ -747,6 +745,17 @@ QJsonObject ProfileCommandDiagnostics(const DesktopWorkspace &w, const ProfileSw
                                                        : "failed or unavailable"},
                         {"native_code", entry.result.nativeCode},
                         {"attempted", entry.attempted}});
+        auto record = entries.last().toObject();
+        record["transport"] = entry.target.transport == WindowsDdcTransport ? "windows-ddc"
+#ifdef Q_OS_WIN
+            : "amd-adl";
+#else
+            : "ddcutil";
+#endif
+        if (entry.target.transport == WindowsDdcTransport &&
+            NativeWindowsDisplayNumber(entry.target.nativeDisplay) >= 0)
+            record["windows_display"] = entry.target.nativeDisplay;
+        entries[entries.size() - 1] = record;
     }
     return {{"complete", r.complete()}, {"monitors", entries}};
 }

@@ -143,7 +143,13 @@ The LG UltraFine **40U990A-W** has a model-specific **Thunderbolt** input using
 `0xD2` with **LG alternate (0xF4)** and the configured source (normally `0x50`),
 as [confirmed by the reporter of #33](https://github.com/phillip9933/LGInputSwitch/issues/33).
 The shared Windows/Linux setup recognizes this exact model from live EDID,
-ddcutil discovery or the capabilities model field. Automatic setup adds a separate
+ddcutil discovery or the capabilities model field. Development builds also match
+the reported capabilities name `U990A` and EDID manufacturer/product **GSM / 0x9EBA**.
+The EDID name alone can be the generic `LG ULTRAFINE`, so it does not identify the
+model. The identifiers come from an owner's
+[40U990A-W hardware output](https://note.com/a_244/n/n76eeb350686f); they still need
+confirmation on the issue reporter's unit. Other UltraFine product IDs do not gain
+this mapping. Automatic setup adds a separate
 Thunderbolt input and, for a single-monitor profile, an action with no shortcut
 assigned. It does not replace USB-C `0xD1` or assume that other LG models use
 `0xD2`. If capabilities are incomplete/unavailable but the live model is known,
@@ -169,12 +175,45 @@ Unmatched, duplicate, cloned or ambiguous native targets keep the existing
 mapping. Native diagnostic indices are never assumed to be AMD indices. SetupAPI
 is part of Windows; no additional third-party runtime library is introduced.
 
-Standard switching uses the existing platform transports: ddcutil on Linux and
-AMD ADL on Windows. It does not add Intel/NVIDIA Windows GPU backends. DDC/CI must
+Standard switching uses ddcutil on Linux and AMD ADL on existing AMD Windows
+connections. DDC/CI must
 be enabled in the monitor, and some models/cables/docks/firmware do not implement
 input switching or will not accept it while inactive. An advertised code is
 useful evidence, not a compatibility guarantee. No automatic fallback sends both
 standard and LG commands. Protocol background: [ddcutil Input Source example](https://www.ddcutil.com/getvcp_known_u3011_output/).
+
+### Windows docks and standard connections (development)
+
+After 1.3.3, native Windows monitor discovery also exposes monitors behind
+DisplayLink docks and other graphics devices that AMD's interface cannot address.
+A uniquely matched AMD connection retains AMD raw access. Other connections are
+labeled **Standard DDC/CI** and use Windows' monitor API for explicit standard
+`0x60` input writes. The native path does not require an AMD GPU or an added
+runtime library. Actual monitor/driver/dock compatibility needs tester feedback.
+
+This is not a raw-I2C transport: Windows' documented
+[SetVCPFeature API](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-setvcpfeature)
+has no custom source-address argument. LG `0xF4` alternate switching is rejected
+on these native connections with an explanatory message; no different command or
+source is silently substituted. Some LG monitors ignore standard input writes,
+even when they advertise `0x60`. Issue #5's LG-through-DisplayLink setup therefore
+remains unconfirmed and may require a direct GPU connection for LG alternate
+switching. Selecting **Standard** and loading its presets is an explicit test,
+not a promised fix for that LG model.
+
+Native discovery, capability reads and writes run in bounded child processes.
+Each write rechecks the selected Windows display and its local identity; replaced,
+missing or ambiguous targets are rejected. Physical monitor handles are released
+on both success and failure. Native routes are saved under profile schema 4 so
+older AMD-only builds reject them rather than treating Windows display numbers
+as AMD indices. Existing AMD/Linux setups retain schema 3 and their mappings.
+
+Diagnostic report format 3 identifies each selected connection's transport and
+Windows display, automatic-input mode, known input profile, and EDID manufacturer/
+product code. It reports these hardware fields for Windows displays even when
+the app cannot select them. Raw EDID, arbitrary model text, interface paths,
+serials and local identity hashes remain excluded. Standard DDC/CI reads can
+succeed through a dock without proving support for LG's alternate writes.
 
 ### Settings and migration
 

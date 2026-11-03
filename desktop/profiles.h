@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/input_history.h"
 #include "platform.h"
+#include "monitor_identity.h"
 #include <functional>
 
 // Persistent IDs belong to the app. Identity is a local fingerprint, never a
@@ -48,8 +49,6 @@ const SavedMonitor *FindMonitor(const DesktopWorkspace &workspace, const QString
 const MonitorProfile *FindProfile(const DesktopWorkspace &workspace, const QString &id);
 const DesktopInput *FindMonitorInput(const SavedMonitor &monitor, const QString &id);
 QString MonitorRouteKey(const DesktopMonitor &monitor);
-QString MonitorIdentity(const QByteArray &edid);
-QString MonitorInputProfileFromEdid(const QByteArray &edid);
 Discovery ParseDesktopDiscovery(const QByteArray &output);
 // Unique fingerprints may follow changed native indices. Missing/duplicate
 // fingerprints require explicit selection; session confirmations never override

@@ -2,6 +2,7 @@
 #include "../desktop/diagnostics.h"
 #include "../desktop/monitor_inputs.h"
 #include "../desktop/input_models.h"
+#include "../desktop/windows_monitors.h"
 #include <QApplication>
 #include <iostream>
 
@@ -125,11 +126,13 @@ static void thunderboltInputs()
         value["read"] = true;
         return value;
     };
-    auto edid = [](const QByteArray &model, unsigned int manufacturer = 0x1e6d) {
+    auto edid = [](const QByteArray &model, unsigned int manufacturer = 0x1e6d, int product = 0) {
         QByteArray bytes(128, '\0');
         bytes.replace(0, 8, QByteArray::fromHex("00ffffffffffff00"));
         bytes[8] = char(manufacturer >> 8);
         bytes[9] = char(manufacturer & 0xff);
+        bytes[10] = char(product & 0xff);
+        bytes[11] = char(product >> 8);
         bytes.replace(54, 5, QByteArray::fromHex("000000fc00"));
         bytes.replace(59, 13, model.leftJustified(13, ' '));
         unsigned int sum = 0;
@@ -139,8 +142,16 @@ static void thunderboltInputs()
         return bytes;
     };
     check(MonitorInputProfileFromEdid(edid("40U990A-W\n")) == Lg40U990AInputProfile &&
-              MonitorInputProfileFromEdid(edid("40U990A", 0x30e4)) == Lg40U990AInputProfile,
+              MonitorInputProfileFromEdid(edid("40U990A", 0x30e4)) == Lg40U990AInputProfile &&
+              MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x1e6d, 0x9eba)) == Lg40U990AInputProfile,
           "LG EDID model descriptor did not select the Thunderbolt profile");
+    check(MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x1e6d, 0x9ebb)).isEmpty() &&
+              MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x10ac, 0x9eba)).isEmpty() &&
+              KnownMonitorInputProfile("LG ULTRAFINE").isEmpty(),
+          "Generic UltraFine name or another manufacturer's product selected Thunderbolt");
+    check(InputsFromCapabilities(MigrateDesktopConfig(DesktopConfig{}).monitors[0],
+              caps("(model(U990A)vcp(60(0F 10 11 12) F4))")).inputs.size() == 5,
+          "Reported U990A capabilities alias failed to select the Thunderbolt profile");
     auto corrupt = edid("40U990A-W");
     corrupt[127] = char(corrupt[127] + 1);
     check(MonitorInputProfileFromEdid(corrupt).isEmpty() &&
@@ -242,6 +253,55 @@ static void thunderboltInputs()
     check(standard.complete && standard.inputs.size() == 4 && standard.inputs[0].code == "0x0f",
           "LG Thunderbolt override changed standard DDC/CI inputs");
 }
+static void nativeProfiles()
+{
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &monitor = w.monitors[0];
+    monitor.method = "standard";
+    monitor.identity = QString(64, 'a');
+    monitor.route = {"Dock monitor", -1, 6, false, monitor.identity};
+    monitor.route.transport = WindowsDdcTransport;
+    monitor.route.nativeDisplay = "\\\\.\\DISPLAY6";
+    monitor.inputs = DefaultMonitorInputs("standard");
+    auto &profile = w.profiles[0];
+    profile.actions.clear();
+    for (const auto &input : monitor.inputs)
+        profile.actions.push_back({NewDesktopId(), input.label, {}, true, {{monitor.id, input.id}}});
+    QString error;
+    check(ValidateWorkspace(w, error), qPrintable(error));
+    const auto json = WorkspaceJson(w);
+    DesktopWorkspace restored;
+    check(json["version"] == 4 && ParseWorkspace(json, restored, error) &&
+              WorkspaceJson(restored) == json && restored.monitors[0].route.transport == WindowsDdcTransport,
+          "Native connection was dropped or saved in an older schema that would misroute commands");
+    auto old = json; old["version"] = 3;
+    check(!ParseWorkspace(old, restored, error), "Native route was accepted under the old AMD-only schema");
+    Discovery live;
+    auto moved = monitor.route;
+    moved.display = 9;
+    moved.nativeDisplay = "\\\\.\\DISPLAY9";
+    live.monitors = {moved};
+    int sent = 0;
+    const auto result = SendProfileAction(w, profile.id, profile.actions[0].id, live, {}, {},
+        [&](const DesktopConfig &config, const QString &code) {
+            ++sent;
+            check(config.transport == WindowsDdcTransport && config.nativeDisplay == moved.nativeDisplay &&
+                      config.targetIdentity == monitor.identity && config.adapter == -1 && config.display == 9 &&
+                      config.source == "0x51" && code == "0x0f",
+                  "Profile lost the native target, identity or standard source after reconnect");
+            return lg::SwitchResult{lg::SwitchStatus::CommandSent, 0, "Synthetic native write"};
+        });
+    check(result.complete() && sent == 1, "Native profile did not dispatch to its live connection");
+    const auto report = ProfileCommandDiagnostics(w, result)["monitors"].toArray()[0].toObject();
+    check(report["transport"] == "windows-ddc" && report["windows_display"] == "\\\\.\\DISPLAY9",
+          "Command diagnostics did not identify the native Windows transport");
+    live.monitors[0].transport.clear(); // Same EDID, different backend must require reconnect.
+    check(!ResolveSavedMonitor(monitor, live).available,
+          "Saved native connection silently changed into an AMD connection");
+    auto invalid = w;
+    invalid.monitors[0].route.transport = "PRIVATE unsupported";
+    check(!ValidateWorkspace(invalid, error), "Unsupported transport was persisted");
+}
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -252,6 +312,7 @@ int main(int argc, char **argv)
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temp.path());
     automaticInputs();
     thunderboltInputs();
+    nativeProfiles();
     DesktopConfig legacy;
     legacy.adapter = 4;
     legacy.display = 5;

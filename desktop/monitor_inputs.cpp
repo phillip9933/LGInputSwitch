@@ -2,14 +2,10 @@
 #include "../core/input_value.h"
 #include "diagnostics.h"
 #include "input_models.h"
+#include "windows_monitors.h"
 #include "process.h"
 #ifdef Q_OS_WIN
 #include "../platform/windows/adl_session.h"
-#include <lowlevelmonitorconfigurationapi.h>
-#include <physicalmonitorenumerationapi.h>
-#include <setupapi.h>
-#include <vector>
-#include <windows.h>
 #endif
 
 namespace
@@ -214,10 +210,10 @@ MonitorInputRead InputsFromCapabilities(const SavedMonitor &m, const QJsonObject
 QJsonObject ReadMonitorCapabilities(const DesktopMonitor &target)
 {
 #ifdef Q_OS_WIN
-    const auto process = RunDesktopProcess(
-        QCoreApplication::applicationFilePath(),
-        {"--input-probe", QString::number(target.adapter), QString::number(target.display), target.identity},
-        15000);
+    const QStringList arguments = target.transport == WindowsDdcTransport
+        ? QStringList{"--windows-input-probe", target.nativeDisplay, target.identity}
+        : QStringList{"--input-probe", QString::number(target.adapter), QString::number(target.display), target.identity};
+    const auto process = RunDesktopProcess(QCoreApplication::applicationFilePath(), arguments, 15000);
     if (process.status == "finished" && process.exitCode == 0)
     {
         const auto doc = QJsonDocument::fromJson(process.output);
@@ -334,106 +330,6 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
 }
 
 #ifdef Q_OS_WIN
-namespace
-{
-QString InterfaceIdentity(const wchar_t *path)
-{
-    const auto set = SetupDiCreateDeviceInfoList(nullptr, nullptr);
-    if (set == INVALID_HANDLE_VALUE)
-        return {};
-    SP_DEVICE_INTERFACE_DATA interfaceData{};
-    interfaceData.cbSize = sizeof(interfaceData);
-    SP_DEVINFO_DATA device{};
-    device.cbSize = sizeof(device);
-    QString identity;
-    if (SetupDiOpenDeviceInterfaceW(set, path, 0, &interfaceData))
-    {
-        DWORD bytes = 0;
-        SetupDiGetDeviceInterfaceDetailW(set, &interfaceData, nullptr, 0, &bytes, nullptr);
-        if (bytes >= sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) && bytes <= 65536)
-        {
-            std::vector<unsigned char> buffer(bytes);
-            auto *detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W *>(buffer.data());
-            detail->cbSize = sizeof(*detail);
-            if (SetupDiGetDeviceInterfaceDetailW(set, &interfaceData, detail, bytes, nullptr, &device))
-            {
-                const auto key =
-                    SetupDiOpenDevRegKey(set, &device, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_QUERY_VALUE);
-                if (key != INVALID_HANDLE_VALUE)
-                {
-                    DWORD length = 0, type = 0;
-                    if (RegQueryValueExW(key, L"EDID", nullptr, &type, nullptr, &length) == ERROR_SUCCESS &&
-                        type == REG_BINARY && length >= 128 && length <= 16384)
-                    {
-                        QByteArray edid(int(length), '\0');
-                        if (RegQueryValueExW(key, L"EDID", nullptr, &type,
-                                             reinterpret_cast<BYTE *>(edid.data()),
-                                             &length) == ERROR_SUCCESS &&
-                            type == REG_BINARY)
-                            identity = MonitorIdentity(edid.left(int(length)));
-                    }
-                    RegCloseKey(key);
-                }
-            }
-        }
-    }
-    SetupDiDestroyDeviceInfoList(set);
-    return identity;
-}
-struct TargetProbe
-{
-    QString identity;
-    int matches = 0, displays = 0;
-    QJsonObject caps;
-};
-BOOL CALLBACK TargetDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM raw)
-{
-    auto &probe = *reinterpret_cast<TargetProbe *>(raw);
-    if (++probe.displays > 32)
-        return FALSE;
-    MONITORINFOEXW info{};
-    info.cbSize = sizeof(info);
-    if (!GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO *>(&info)))
-        return TRUE;
-    QStringList identities;
-    for (DWORD index = 0; index < 16; ++index)
-    {
-        DISPLAY_DEVICEW device{};
-        device.cb = sizeof(device);
-        if (!EnumDisplayDevicesW(info.szDevice, index, &device, EDD_GET_DEVICE_INTERFACE_NAME))
-            break;
-        if (!(device.StateFlags & DISPLAY_DEVICE_ACTIVE))
-            continue;
-        identities.push_back(InterfaceIdentity(device.DeviceID));
-    }
-    // Neither physical-handle ordering nor an AMD index is a Windows index.
-    if (identities.size() != 1 || identities.front() != probe.identity)
-        return TRUE;
-    ++probe.matches;
-    DWORD count = 0;
-    if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &count) || count != 1)
-        return TRUE;
-    PHYSICAL_MONITOR physical{};
-    if (!GetPhysicalMonitorsFromHMONITOR(monitor, 1, &physical))
-        return TRUE;
-    DWORD length = 0;
-    if (GetCapabilitiesStringLength(physical.hPhysicalMonitor, &length) && length > 0 && length <= 65536)
-    {
-        QByteArray text(int(length), '\0');
-        if (CapabilitiesRequestAndCapabilitiesReply(physical.hPhysicalMonitor, text.data(), length))
-        {
-            const auto end = text.indexOf('\0');
-            if (end >= 0)
-            {
-                probe.caps = ParseDiagnosticCapabilities(text.left(end));
-                probe.caps["read"] = true;
-            }
-        }
-    }
-    DestroyPhysicalMonitors(1, &physical);
-    return TRUE;
-}
-} // namespace
 QJsonObject ProbeTargetCapabilities(int adapter, int display, const QString &expectedIdentity)
 {
     if (adapter < 0 || display < 0 || !InitializeAdl() || !Adl().edid)
@@ -443,18 +339,16 @@ QJsonObject ProbeTargetCapabilities(int adapter, int display, const QString &exp
     if (Adl().edid(adapter, display, &data) != ADL_OK || data.iEDIDSize < 128 ||
         data.iEDIDSize > ADL_MAX_EDIDDATA_SIZE)
         return {{"read", false}};
-    const auto identity = MonitorIdentity(QByteArray(data.cEDIDData, data.iEDIDSize));
+    const QByteArray edid(data.cEDIDData, data.iEDIDSize);
+    const auto identity = MonitorIdentity(edid);
     if (identity.isEmpty() || (!expectedIdentity.isEmpty() && identity != expectedIdentity))
         return {{"read", false}};
-    TargetProbe probe;
-    probe.identity = identity;
-    EnumDisplayMonitors(nullptr, nullptr, TargetDisplay, reinterpret_cast<LPARAM>(&probe));
-    if (probe.matches != 1 || probe.caps.isEmpty())
-        return {{"read", false}, {"status", "ambiguous or unavailable native mapping"}};
-    const unsigned int manufacturer =
-        (static_cast<unsigned char>(data.cEDIDData[8]) << 8) | static_cast<unsigned char>(data.cEDIDData[9]);
-    if (manufacturer == 0x10ac)
-        probe.caps["manufacturer"] = "DEL";
-    return probe.caps;
+    auto caps = ProbeNativeWindowsCapabilities({}, identity);
+    const auto hardware = MonitorEdidHardware(edid);
+    caps["hardware"] = hardware;
+    caps["manufacturer"] = hardware["manufacturer"];
+    if (!hardware["input_profile"].toString().isEmpty())
+        caps["input_profile"] = hardware["input_profile"];
+    return caps;
 }
 #endif
