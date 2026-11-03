@@ -1,6 +1,7 @@
 #include "profiles.h"
 #include "../core/input_value.h"
 #include "monitor_inputs.h"
+#include "input_models.h"
 #include <QKeySequence>
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
@@ -98,7 +99,7 @@ QString NewDesktopId()
 {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
-QVector<DesktopInput> DefaultMonitorInputs(const QString &method)
+QVector<DesktopInput> DefaultMonitorInputs(const QString &method, const QString &inputProfile)
 {
     QVector<DesktopInput> inputs = method == "standard"
                                        ? QVector<DesktopInput>{{"DisplayPort 1", "0x0f", {}, true},
@@ -106,6 +107,9 @@ QVector<DesktopInput> DefaultMonitorInputs(const QString &method)
                                                                {"HDMI 1", "0x11", {}, true},
                                                                {"HDMI 2", "0x12", {}, true}}
                                        : DesktopConfig{}.inputs;
+    // Issue #33: confirmed for this model only. USB-C stays a separate 0xD1 input.
+    if (method == "lg" && inputProfile == Lg40U990AInputProfile)
+        inputs.push_back({"Thunderbolt", "0xD2", {}, true});
     for (auto &input : inputs)
     {
         input.id = NewDesktopId();
@@ -482,6 +486,24 @@ QString MonitorIdentity(const QByteArray &edid)
     // Base block contains model/serial. Ignore mutable extension blocks.
     return Hash(edid.left(128));
 }
+QString MonitorInputProfileFromEdid(const QByteArray &edid)
+{
+    if (MonitorIdentity(edid).isEmpty())
+        return {};
+    const unsigned int manufacturer = (static_cast<unsigned char>(edid[8]) << 8) |
+                                      static_cast<unsigned char>(edid[9]);
+    if (manufacturer != 0x1e6d && manufacturer != 0x30e4) // GSM / LGD
+        return {};
+    for (int offset = 54; offset <= 108; offset += 18)
+        if (edid.mid(offset, 5) == QByteArray::fromHex("000000fc00"))
+        {
+            const auto profile = KnownMonitorInputProfile(
+                QString::fromLatin1(edid.mid(offset + 5, 13)));
+            if (!profile.isEmpty())
+                return profile;
+        }
+    return {};
+}
 Discovery ParseDesktopDiscovery(const QByteArray &output)
 {
     Discovery result;
@@ -524,7 +546,10 @@ Discovery ParseDesktopDiscovery(const QByteArray &output)
     }
     append();
     for (auto &m : result.monitors)
+    {
+        m.inputProfile = KnownMonitorInputProfile(m.label);
         m.label += m.bus ? QString(" · I²C %1").arg(m.display) : QString(" · Display %1").arg(m.display);
+    }
     return result;
 }
 MonitorResolution ResolveSavedMonitor(const SavedMonitor &m, const Discovery &d,

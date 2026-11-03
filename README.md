@@ -37,7 +37,7 @@ or save it with your [issue](https://github.com/phillip9933/LGInputSwitch/issues
 Reports stay local until you share them. Check for app updates in **Preferences → Application updates**.
 
 [Build the desktop app](docs/desktop-ui.md) · [Linux CLI](docs/linux-cli.md) ·
-[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.2.md)
+[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.3.md)
 
 ## License and credits
 

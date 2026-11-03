@@ -1,4 +1,5 @@
 #include "diagnostics.h"
+#include "input_models.h"
 #include <algorithm>
 
 namespace
@@ -71,9 +72,10 @@ QJsonObject ParseDiagnosticCapabilities(const QByteArray &response)
     }
     QByteArray vcp;
     bool hasVcp = false;
-    QString version;
+    QString version, inputProfile;
+    bool hasModel = false;
     // Walk only top-level fields. A string inside model()/serial() cannot inject
-    // a fake vcp() section, and none of those free-text fields are exported.
+    // a fake vcp() section. Only an allowlisted input profile is exported from model().
     for (int position = 0; position < text.size();)
     {
         SkipSpace(text, position);
@@ -87,6 +89,12 @@ QJsonObject ParseDiagnosticCapabilities(const QByteArray &response)
         const int close = ClosingParen(text, position);
         if (close < 0) return Invalid("malformed response");
         const auto value = text.mid(position + 1, close - position - 1);
+        if (key == "model")
+        {
+            if (hasModel) return Invalid("duplicate model sections");
+            hasModel = true;
+            inputProfile = KnownMonitorInputProfile(QString::fromLatin1(value));
+        }
         if (key == "vcp")
         {
             if (hasVcp) return Invalid("duplicate vcp sections");
@@ -156,5 +164,6 @@ QJsonObject ParseDiagnosticCapabilities(const QByteArray &response)
         {"interpretation", "Advertised capabilities can be incomplete or inaccurate. Missing controls/values "
                            "do not prove lack of support. No listed value is automatically written or applied."}};
     if (!version.isEmpty()) result["mccs_version"] = version;
+    if (!inputProfile.isEmpty()) result["input_profile"] = inputProfile;
     return result;
 }

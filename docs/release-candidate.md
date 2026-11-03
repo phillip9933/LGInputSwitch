@@ -1,7 +1,7 @@
 # Release publication
 
 The project uses numeric versions and full releases, as requested by the maintainer.
-The current version is 1.3.2; see [release notes](releases/1.3.2.md),
+The current version is 1.3.3; see [release notes](releases/1.3.3.md),
 [Windows setup](windows-release.md) and [Linux setup](linux-install.md).
 
 The Publish full release workflow checks that the selected numeric version matches
@@ -19,7 +19,7 @@ the pinned official URL linked beside the binary in release notes. Debug symbols
 Arch recipes/source/provenance and build metadata remain internal CI artifacts.
 Published older releases retain their original assets.
 
-The previous Linux beta was an earlier publication and is superseded by 1.3.2.
+The previous Linux beta was an earlier publication and is superseded by 1.3.3.
 Future builds do not use alpha/beta/RC version suffixes or prerelease labels.
 
 Intel/NVIDIA backends and macOS remain roadmap work; Windows reports #4/#5 remain

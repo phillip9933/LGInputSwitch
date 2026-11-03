@@ -139,6 +139,23 @@ status explaining that automatic setup was unavailable. No write probes or
 fallback switching commands are used. Relevant protocol notes are in the
 [ddcutil LG wiki](https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors).
 
+The LG UltraFine **40U990A-W** has a model-specific **Thunderbolt** input using
+`0xD2` with **LG alternate (0xF4)** and the configured source (normally `0x50`),
+as [confirmed by the reporter of #33](https://github.com/phillip9933/LGInputSwitch/issues/33).
+The shared Windows/Linux setup recognizes this exact model from live EDID,
+ddcutil discovery or the capabilities model field. Automatic setup adds a separate
+Thunderbolt input and, for a single-monitor profile, an action with no shortcut
+assigned. It does not replace USB-C `0xD1` or assume that other LG models use
+`0xD2`. If capabilities are incomplete/unavailable but the live model is known,
+Thunderbolt is added while the existing input list is kept. Method presets also
+include Thunderbolt when live discovery identifies this model. Saved/custom names
+are not used as evidence of the hardware model, and only the allowlisted model
+profile identifier is added to diagnostics; raw model/EDID/serial text stays private.
+Manual input mode remains unchanged. Use **Refresh**, then **Save settings** to
+apply automatic setup to an existing monitor. If the monitor reports a generic
+model name, add a **Thunderbolt** input with `0xD2` manually in **Edit monitor &
+inputs**. Other Thunderbolt models still require their own confirmed mappings.
+
 Changes are drafts until **Save settings**. In **Edit monitor & inputs**, uncheck
 **Read and set up this monitor’s inputs automatically** for a custom mapping.
 Read advertised inputs can refresh an automatic list or append to a manual list;

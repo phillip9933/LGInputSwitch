@@ -626,7 +626,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             if (matches == 1)
                 m.identity = target.identity;
             m.method = method->currentData().toString();
-            m.inputs = DefaultMonitorInputs(m.method);
+            m.inputs = DefaultMonitorInputs(m.method, target.inputProfile);
             confirmed_[m.id] = target;
             id = m.id;
             draft_.monitors.push_back(m);
@@ -749,7 +749,9 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                                       "inputs? Existing action mappings that cannot be matched by input name "
                                       "will need to be selected again before saving.") != QMessageBox::Yes)
                 return;
-            auto defaults = DefaultMonitorInputs(method->currentData().toString());
+            const auto resolved = ResolveSavedMonitor(next, discovery_, confirmed_);
+            auto defaults = DefaultMonitorInputs(method->currentData().toString(),
+                                                resolved.available ? resolved.target.inputProfile : QString{});
             auto canonical = [](QString name) {
                 name.remove(' ');
                 if (name.compare("DisplayPort", Qt::CaseInsensitive) == 0)
@@ -2253,7 +2255,7 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
-    app.setApplicationVersion("1.3.2");
+    app.setApplicationVersion("1.3.3");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
