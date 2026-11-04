@@ -20,6 +20,8 @@ struct ProfileAction
     QString id, name, shortcut;
     bool enabled = true;
     QMap<QString, QString> inputs; // saved monitor ID -> physical input ID
+    bool autoDisabled = false;
+    QMap<QString, QString> missingInputs; // monitor ID -> temporarily missing input code
 };
 struct MonitorProfile
 {
@@ -41,7 +43,11 @@ DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy);
 QJsonObject WorkspaceJson(const DesktopWorkspace &workspace);
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &workspace, QString &error);
 bool ValidateWorkspace(const DesktopWorkspace &workspace, QString &error);
-DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath = {});
+enum class WorkspaceLoadStatus { Loaded, Migrated, Blocked };
+DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath = {},
+                                      WorkspaceLoadStatus *status = nullptr);
+// Function keys may stand alone; other global keys need Ctrl, Alt or Meta.
+bool SafeDesktopShortcut(const QString &text);
 bool SaveDesktopWorkspace(const DesktopWorkspace &workspace, QString &error, const QString &storagePath = {});
 QString WorkspacePath(); // Windows portable file; empty on Linux (QSettings)
 

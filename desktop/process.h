@@ -6,6 +6,7 @@ struct DesktopProcessResult
     QString status;
     int exitCode = -1;
     QByteArray output;
+    QByteArray errorOutput;
 };
 
 // No shell or elevation. Used for discovery, diagnostics and explicit switch commands.
@@ -13,7 +14,6 @@ inline DesktopProcessResult RunDesktopProcess(const QString &program, const QStr
                                                int timeoutMs, int outputLimit = 65536)
 {
     QProcess process;
-    process.setProcessChannelMode(QProcess::MergedChannels);
     process.start(program, arguments);
     if (!process.waitForStarted(3000))
         return {"unavailable", -1, {}};
@@ -23,8 +23,10 @@ inline DesktopProcessResult RunDesktopProcess(const QString &program, const QStr
         process.waitForFinished(3000);
         return {"timed out", -1, {}};
     }
-    const auto output = process.readAll();
-    if (output.size() > outputLimit) return {"output limit exceeded", process.exitCode(), {}};
+    const auto output = process.readAllStandardOutput();
+    const auto errors = process.readAllStandardError();
+    if (output.size() + errors.size() > outputLimit)
+        return {"output limit exceeded", process.exitCode(), {}};
     return {process.exitStatus() == QProcess::NormalExit ? "finished" : "crashed",
-            process.exitCode(), output};
+            process.exitCode(), output, errors};
 }

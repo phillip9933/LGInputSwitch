@@ -23,6 +23,15 @@ static UINT VkFromToken(const std::string& t) {
         if (parsed.ec == std::errc{} && parsed.ptr == t.data() + t.size() &&
             f >= 1 && f <= 24) return VK_F1 + (f - 1);
     }
+    // Qt PortableText names for common navigation keys. Values are Win32 VKs.
+    static const struct { const char *name; UINT key; } navigation[] = {
+        {"HOME", 0x24}, {"END", 0x23}, {"LEFT", 0x25}, {"UP", 0x26},
+        {"RIGHT", 0x27}, {"DOWN", 0x28}, {"PGUP", 0x21}, {"PGDOWN", 0x22},
+        {"INS", 0x2d}, {"DEL", 0x2e}, {"TAB", 0x09}, {"ESC", 0x1b},
+        {"SPACE", 0x20}, {"BACKSPACE", 0x08}, {"RETURN", 0x0d}
+    };
+    for (const auto &entry : navigation)
+        if (t == entry.name) return entry.key;
     return 0;
 }
 bool ParseHotkey(const std::string& spec, HotkeySpec& out) {
@@ -47,7 +56,8 @@ bool ParseHotkey(const std::string& spec, HotkeySpec& out) {
         if (pos == std::string::npos) break;
         start = pos + 1;
     }
-    if (!parsed.vk) return false;
+    if (!parsed.vk || (!(parsed.fsModifiers & (MOD_CONTROL | MOD_ALT | MOD_WIN)) &&
+        (parsed.vk < VK_F1 || parsed.vk > VK_F1 + 23))) return false;
     out = parsed;
     return true;
 }

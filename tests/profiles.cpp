@@ -48,6 +48,52 @@ static DesktopWorkspace fixture()
     w.profiles.push_back(side);
     return w;
 }
+static void temporaryInputRecovery()
+{
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &monitor = w.monitors[0];
+    const auto monitorId = monitor.id;
+    const auto inputs = monitor.inputs;
+    auto &profile = w.profiles[0];
+    profile.actions[0].name = "Work PC"; // Custom scene names must survive.
+    profile.actions[0].shortcut = "CTRL+ALT+F10";
+    profile.actions[1].enabled = false;
+    const auto actionId = profile.actions[0].id;
+    const auto actionKey = profile.actions[0].shortcut;
+    auto subset = inputs.mid(2);
+    check(ApplyMonitorInputs(w, monitorId, {subset, "Synthetic subset", true}), "Missing inputs did not apply");
+    check(!profile.actions[0].enabled && profile.actions[0].autoDisabled &&
+              !profile.actions[1].enabled && !profile.actions[1].autoDisabled,
+          "Automatic retirement lost the user's enabled/disabled choice");
+    QString error;
+    DesktopWorkspace loaded;
+    check(ParseWorkspace(WorkspaceJson(w), loaded, error), "Missing-input recovery did not survive a save/load");
+    check(ApplyMonitorInputs(loaded, monitorId, {inputs, "Synthetic full list", true}), "Returning inputs did not apply");
+    const auto &restored = loaded.profiles[0].actions;
+    check(restored[0].enabled && !restored[0].autoDisabled && restored[0].id == actionId &&
+              restored[0].name == "Work PC" && restored[0].shortcut == actionKey &&
+              !restored[1].enabled && restored.size() == inputs.size(),
+          "Input return lost a custom action or re-enabled an intentionally disabled action");
+    check(ValidateWorkspace(loaded, error), qPrintable(error));
+    // A shortcut may have been assigned to another action while this one was hidden.
+    w.profiles[0].actions[2].shortcut = actionKey;
+    check(ApplyMonitorInputs(w, monitorId, {inputs, "Full list", true}) &&
+              !w.profiles[0].actions[0].enabled && w.profiles[0].actions[0].autoDisabled &&
+              ValidateWorkspace(w, error), "Recovery stole a shortcut or made the workspace invalid");
+    // Recover groups only when all of their missing mappings return.
+    auto group = fixture();
+    const auto firstId = group.monitors[0].id, secondId = group.monitors[1].id;
+    const auto firstInputs = group.monitors[0].inputs, secondInputs = group.monitors[1].inputs;
+    ApplyMonitorInputs(group, firstId, {firstInputs.mid(1), "Subset", true});
+    ApplyMonitorInputs(group, secondId, {secondInputs.mid(1), "Subset", true});
+    ApplyMonitorInputs(group, firstId, {firstInputs, "Full", true});
+    check(!group.profiles[0].actions[0].enabled, "Group re-enabled before every target returned");
+    DesktopWorkspace reloaded;
+    check(ParseWorkspace(WorkspaceJson(group), reloaded, error), qPrintable(error));
+    ApplyMonitorInputs(reloaded, secondId, {secondInputs, "Full", true});
+    check(reloaded.profiles[0].actions[0].enabled && ValidateWorkspace(reloaded, error),
+          "Grouped action did not recover after all inputs returned");
+}
 static void automaticInputs()
 {
     auto caps = [](const QByteArray &text) {
@@ -311,6 +357,7 @@ int main(int argc, char **argv)
     check(temp.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temp.path());
     automaticInputs();
+    temporaryInputRecovery();
     thunderboltInputs();
     nativeProfiles();
     DesktopConfig legacy;
@@ -348,14 +395,16 @@ int main(int argc, char **argv)
     const auto storage = temp.filePath("profiles.json");
     check(SaveDesktopWorkspace(w, error, storage), "Atomic profile save failed");
     QString warning;
-    const auto loaded = LoadDesktopWorkspace(warning, storage);
+    WorkspaceLoadStatus loadStatus;
+    const auto loaded = LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Loaded, "Successful load status missing");
     check(warning.isEmpty() && WorkspaceJson(w) == WorkspaceJson(loaded), "Saved workspace did not load");
     QFile corrupt(storage);
     check(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate), "Corrupt fixture failed");
     corrupt.write("{broken");
     corrupt.close();
-    LoadDesktopWorkspace(warning, storage);
-    check(warning.startsWith("Saved profiles could not be read."), "Corrupt config did not block switching");
+    LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Blocked, "Corrupt config did not block switching");
     error.clear();
     check(!SaveDesktopWorkspace(w, error, storage), "Corrupt config was overwritten");
     check(corrupt.open(QIODevice::ReadOnly) && corrupt.readAll() == "{broken",
@@ -364,6 +413,19 @@ int main(int argc, char **argv)
     auto json = WorkspaceJson(w);
     json["version"] = 999;
     check(!ParseWorkspace(json, parsed, error), "Future schema was accepted");
+    check(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate), "Future fixture unavailable");
+    corrupt.write(QJsonDocument(json).toJson()); corrupt.close();
+    LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Blocked && !SaveDesktopWorkspace(w, error, storage),
+          "Future configuration was not protected");
+    check(SafeDesktopShortcut("F8") && SafeDesktopShortcut("Ctrl+Home") &&
+              !SafeDesktopShortcut("A") && !SafeDesktopShortcut("Shift+A"),
+          "Unsafe typing shortcuts were accepted");
+    auto unsafe = w;
+    unsafe.profiles[0].actions[0].shortcut = "A";
+    check(ParseWorkspace(WorkspaceJson(unsafe), parsed, error), "Old unsafe shortcut blocked profile recovery");
+    check(!SaveDesktopWorkspace(unsafe, error, temp.filePath("unsafe.json")) && error.contains("Ctrl, Alt or Meta"),
+          "Unsafe shortcut was saved or its repair message was unclear");
     auto bad = w;
     bad.profiles[1].actions[0].shortcut = bad.profiles[0].actions[0].shortcut;
     check(!ValidateWorkspace(bad, error), "Cross-profile shortcut conflict accepted");
@@ -431,6 +493,13 @@ int main(int argc, char **argv)
     };
     const auto profileId = w.profiles[0].id, firstAction = w.profiles[0].actions[0].id,
                secondAction = w.profiles[0].actions[1].id;
+    const QString backendError = "ddcutil is unavailable. Install ddcutil and try again.";
+    const auto unavailable = SendProfileAction(w, profileId, firstAction, discovery, {}, {},
+        [](const DesktopConfig &, const QString &) -> lg::SwitchResult {
+            check(false, "Unavailable discovery reached the sender"); return {};
+        }, [&] { return Discovery{{}, backendError}; });
+    check(!unavailable.monitors.isEmpty() && unavailable.monitors[0].status == backendError,
+          "Discovery failure was replaced with a misleading identity error");
     auto first = SendProfileAction(w, profileId, firstAction, discovery, {}, {}, sender);
     check(first.complete() && sends.size() == 2 && sends[0] == qMakePair(17, QString("0xD0")) &&
               sends[1] == qMakePair(9, QString("0x11")),

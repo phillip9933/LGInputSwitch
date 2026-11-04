@@ -269,23 +269,31 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
             continue;
         for (auto &action : profile.actions)
         {
-            if (!FindMonitorInput(*m, action.inputs.value(id)))
+            if (FindMonitorInput(*m, action.inputs.value(id)))
+                continue;
+            const auto before = action.inputs.value(id);
+            QString missing = action.missingInputs.value(id);
+            if (missing.isEmpty())
+                for (const auto &old : oldInputs)
+                    if (old.id == before)
+                        missing = old.code;
+            unsigned int code;
+            const auto *match = Value(missing, code) ? ByValue(m->inputs, code) : nullptr;
+            if (match)
             {
-                const auto before = action.inputs.value(id);
-                const bool wasEnabled = action.enabled;
-                const DesktopInput *match = nullptr;
-                for (const auto &input : m->inputs)
-                    if (InputNameKey(action.name) == InputNameKey(input.label))
-                        match = &input;
-                if (match)
-                    action.inputs[id] = match->id;
-                else
-                {
-                    action.inputs[id] = {};
-                    action.enabled = false;
-                }
-                changed = changed || before != action.inputs.value(id) || wasEnabled != action.enabled;
+                action.inputs[id] = match->id;
+                action.missingInputs.remove(id);
             }
+            else
+            {
+                if (!missing.isEmpty())
+                    action.missingInputs[id] = missing;
+                action.inputs[id].clear();
+                if (action.enabled)
+                    action.autoDisabled = true;
+                action.enabled = false;
+            }
+            changed = changed || before != action.inputs.value(id);
         }
         if (profile.monitors.size() != 1)
             continue;
@@ -295,37 +303,47 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
             for (const auto &action : profile.actions)
                 if (action.inputs.value(id) == input.id)
                     exists = true;
-            if (exists)
-                continue;
-            // Restore a matching retired action without discarding its key/ID.
-            bool restored = false;
-            for (auto &action : profile.actions)
-                if (!action.enabled && action.inputs.value(id).isEmpty() &&
-                    InputNameKey(action.name) == InputNameKey(input.label))
-                {
-                    action.inputs[id] = input.id;
-                    restored = true;
-                    changed = true;
-                    break;
-                }
-            if (!restored && profile.actions.size() < 64)
+            if (!exists && profile.actions.size() < 64)
             {
-                profile.actions.push_back({NewDesktopId(), input.label, {}, true, {{id, input.id}}});
+                QString name = input.label;
+                auto used = [&](const QString &label) {
+                    for (const auto &action : profile.actions)
+                        if (action.name == label) return true;
+                    return false;
+                };
+                for (int suffix = 2; used(name); ++suffix)
+                    name = input.label + QString(" (%1)").arg(suffix);
+                profile.actions.push_back({NewDesktopId(), name, {}, true, {{id, input.id}}});
                 changed = true;
             }
         }
-        bool enabled = false;
-        for (const auto &action : profile.actions)
-            if (action.enabled)
-                enabled = true;
-        if (!enabled)
-            for (auto &action : profile.actions)
-                if (FindMonitorInput(*m, action.inputs.value(id)))
-                {
-                    action.enabled = true;
-                    break;
-                }
     }
+    // Restore only actions disabled by discovery, once every group member has
+    // its mapping back. Never reactivate an intentionally disabled action or
+    // steal a shortcut assigned elsewhere while this input was absent.
+    for (auto &profile : w.profiles)
+        for (auto &action : profile.actions)
+            if (action.autoDisabled && action.missingInputs.isEmpty())
+            {
+                bool complete = true;
+                for (const auto &member : profile.monitors)
+                {
+                    const auto *monitor = FindMonitor(w, member);
+                    complete = complete && monitor && FindMonitorInput(*monitor, action.inputs.value(member));
+                }
+                if (!complete) continue;
+                action.enabled = true;
+                action.autoDisabled = false;
+                QString error;
+                if (!ValidateWorkspace(w, error))
+                {
+                    action.enabled = false;
+                    action.autoDisabled = true;
+                    m->inputStatus += " An action needs review in Edit actions: " + error;
+                }
+                else
+                    changed = true;
+            }
     return changed;
 }
 

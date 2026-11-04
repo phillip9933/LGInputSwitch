@@ -179,6 +179,7 @@ DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy)
 QJsonObject WorkspaceJson(const DesktopWorkspace &w)
 {
     QJsonArray monitors, profiles;
+    bool recovery = false;
     for (const auto &m : w.monitors)
         monitors.append(QJsonObject{{"id", m.id},
                                     {"name", m.name},
@@ -198,11 +199,21 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
             QJsonObject mapping;
             for (auto it = a.inputs.begin(); it != a.inputs.end(); ++it)
                 mapping[it.key()] = it.value();
-            actions.append(QJsonObject{{"id", a.id},
+            QJsonObject row{{"id", a.id},
                                        {"name", a.name},
                                        {"shortcut", a.shortcut},
                                        {"enabled", a.enabled},
-                                       {"inputs", mapping}});
+                                       {"inputs", mapping}};
+            if (a.autoDisabled || !a.missingInputs.isEmpty())
+            {
+                QJsonObject missing;
+                for (auto it = a.missingInputs.begin(); it != a.missingInputs.end(); ++it)
+                    missing[it.key()] = it.value();
+                row["autoDisabled"] = a.autoDisabled;
+                row["missingInputs"] = missing;
+                recovery = true;
+            }
+            actions.append(row);
         }
         profiles.append(QJsonObject{{"id", p.id},
                                     {"name", p.name},
@@ -215,7 +226,7 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
     bool native = false;
     for (const auto &monitor : w.monitors)
         native = native || monitor.route.transport == WindowsDdcTransport;
-    return {{"version", native ? 4 : 3},
+    return {{"version", native || recovery ? 4 : 3},
             {"activeProfile", w.activeProfile},
             {"monitors", monitors},
             {"profiles", profiles},
@@ -224,6 +235,17 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                         {"startup", c.startup},
                                         {"globalShortcuts", c.globalShortcuts},
                                         {"debounce", c.debounce}}}};
+}
+bool SafeDesktopShortcut(const QString &text)
+{
+    if (text.isEmpty())
+        return true;
+    const auto sequence = QKeySequence::fromString(text, QKeySequence::PortableText);
+    if (sequence.count() != 1 || sequence[0].key() == Qt::Key_unknown)
+        return false;
+    const auto key = sequence[0];
+    return (key.key() >= Qt::Key_F1 && key.key() <= Qt::Key_F24) ||
+           (key.keyboardModifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
 }
 bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
 {
@@ -295,8 +317,14 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             return false;
 #ifdef Q_OS_WIN
         HotkeySpec spec{};
-        if (!ParseHotkey(text.toStdString(), spec))
+        // Older configurations can contain plain typing keys. Load them for
+        // repair, but never register them or save them as active shortcuts.
+        if (SafeDesktopShortcut(text) && !ParseHotkey(text.toStdString(), spec))
+        {
+            error = "Unsupported Windows shortcut: " + text +
+                    ". Choose a letter, number, function key or navigation key with Ctrl, Alt or Meta.";
             return false;
+        }
 #endif
         shortcuts.insert(canonical);
         return true;
@@ -318,7 +346,7 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             members.insert(id);
         }
         if (!shortcut(p.cycleShortcut) || !shortcut(p.previousShortcut))
-            return fail("Shortcuts must be valid and unique across every profile.");
+            return fail(error.isEmpty() ? "Shortcuts must be valid and unique across every profile." : error);
         QSet<QString> ids, labels;
         for (const auto &a : p.actions)
         {
@@ -328,9 +356,18 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             ids.insert(a.id);
             labels.insert(a.name);
             if (a.enabled && !shortcut(a.shortcut))
-                return fail("Shortcuts must be valid and unique across every profile.");
+                return fail(error.isEmpty() ? "Shortcuts must be valid and unique across every profile." : error);
             if (a.inputs.size() != members.size())
                 return fail(p.name + ": select an input for every assigned monitor in every action.");
+            if (a.autoDisabled && a.enabled)
+                return fail(p.name + ": an action awaiting input recovery must be disabled.");
+            for (auto it = a.missingInputs.begin(); it != a.missingInputs.end(); ++it)
+            {
+                unsigned int code;
+                if (!members.contains(it.key()) || !a.inputs.value(it.key()).isEmpty() || a.enabled ||
+                    !ParseInputValue(it.value().toStdString(), 0xffff, code))
+                    return fail(p.name + ": invalid missing-input recovery information.");
+            }
             for (auto it = a.inputs.begin(); it != a.inputs.end(); ++it)
             {
                 const auto *m = FindMonitor(w, it.key());
@@ -405,6 +442,20 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
             const auto mapping = a["inputs"].toObject();
             for (auto it = mapping.begin(); it != mapping.end(); ++it)
                 row.inputs[it.key()] = it.value().toString();
+            if (a.contains("autoDisabled") || a.contains("missingInputs"))
+            {
+                if (json["version"].toInt() < 4 ||
+                    (a.contains("autoDisabled") && !a["autoDisabled"].isBool()) ||
+                    (a.contains("missingInputs") && !a["missingInputs"].isObject()))
+                {
+                    error = "Invalid input recovery information; configuration version 4 is required.";
+                    return false;
+                }
+                row.autoDisabled = a["autoDisabled"].toBool();
+                const auto missing = a["missingInputs"].toObject();
+                for (auto it = missing.begin(); it != missing.end(); ++it)
+                    row.missingInputs[it.key()] = it.value().toString();
+            }
             p.actions.push_back(row);
         }
         w.profiles.push_back(p);
@@ -422,9 +473,10 @@ QString WorkspacePath()
     return {};
 #endif
 }
-DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath)
+DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath, WorkspaceLoadStatus *status)
 {
     warning.clear();
+    if (status) *status = WorkspaceLoadStatus::Migrated;
     bool exists = false;
     QString error;
     const auto bytes = ReadWorkspaceBytes(exists, error, storagePath);
@@ -436,6 +488,7 @@ DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePa
         if (error.isEmpty() && parse.error == QJsonParseError::NoError && doc.isObject() &&
             ParseWorkspace(doc.object(), w, error))
         {
+            if (status) *status = WorkspaceLoadStatus::Loaded;
 #ifndef Q_OS_WIN
             if (storagePath.isEmpty())
                 w.preferences.startup = DesktopAutostartEnabled();
@@ -445,6 +498,7 @@ DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePa
         warning = "Saved profiles could not be read. Switching and saving are blocked to preserve the file. "
                   "Back up and repair/remove the profile configuration, then restart. " +
                   error;
+        if (status) *status = WorkspaceLoadStatus::Blocked;
         return MigrateDesktopConfig(DesktopConfig{});
     }
     return MigrateDesktopConfig(LoadDesktopConfig(warning));
@@ -454,6 +508,19 @@ bool SaveDesktopWorkspace(const DesktopWorkspace &w, QString &error, const QStri
     error.clear();
     if (!ValidateWorkspace(w, error))
         return false;
+    for (const auto &profile : w.profiles)
+    {
+        auto safe = [&](const QString &name, const QString &shortcut) {
+            if (SafeDesktopShortcut(shortcut)) return true;
+            error = profile.name + " → " + name +
+                    ": use Ctrl, Alt or Meta with this global shortcut, or choose a function key (F1–F24).";
+            return false;
+        };
+        if (!safe("Cycle inputs", profile.cycleShortcut) || !safe("Previous input", profile.previousShortcut))
+            return false;
+        for (const auto &action : profile.actions)
+            if (action.enabled && !safe(action.name, action.shortcut)) return false;
+    }
     // Never overwrite a corrupted/newer file with an in-memory fallback.
     bool exists = false;
     const auto original = ReadWorkspaceBytes(exists, error, storagePath);
@@ -637,7 +704,8 @@ ProfileSwitchResult SendProfileAction(const DesktopWorkspace &w, const QString &
         entry.code = input->code;
         if (!resolution.available)
         {
-            entry.status = resolution.reason;
+            entry.status = current.monitors.isEmpty() && !current.message.isEmpty()
+                               ? current.message : resolution.reason;
             result.monitors.push_back(entry);
             continue;
         }

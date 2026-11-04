@@ -144,16 +144,23 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         {
             ProfileAction a;
             a.id = table_->item(row, 0)->data(Qt::UserRole).toString();
+            for (const auto &previous : p.actions)
+                if (previous.id == a.id)
+                    a = previous;
             a.name = table_->item(row, 1)->text().trimmed();
             a.enabled = table_->item(row, 0)->checkState() == Qt::Checked;
             for (int i = 0; i < p.monitors.size(); ++i)
             {
                 auto *combo = qobject_cast<QComboBox *>(table_->cellWidget(row, 2 + i));
                 const auto *item = table_->item(row, 2 + i);
+                const auto before = a.inputs.value(p.monitors[i]);
                 a.inputs[p.monitors[i]] = combo  ? combo->currentData().toString()
                                           : item ? item->data(Qt::UserRole).toString()
                                                  : QString{};
+                if (before != a.inputs.value(p.monitors[i]))
+                    a.missingInputs.remove(p.monitors[i]);
             }
+            if (a.enabled) a.autoDisabled = false;
             auto *key = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(row, 2 + p.monitors.size()));
             const auto *keyItem = table_->item(row, 2 + p.monitors.size());
             a.shortcut = key       ? key->keySequence().toString(QKeySequence::PortableText).toUpper()
@@ -359,7 +366,10 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 captureDraft();
                 active().monitors.removeAll(id);
                 for (auto &a : active().actions)
+                {
                     a.inputs.remove(id);
+                    a.missingInputs.remove(id);
+                }
                 dirty();
                 populateProfile();
             });
@@ -457,7 +467,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                                                            : input.label,
                                        input.id);
                 combo->setCurrentIndex(combo->findData(a.inputs.value(id)));
-                connect(combo, &QComboBox::currentIndexChanged, this, [this] { dirty(); });
+                connect(combo, &QComboBox::currentIndexChanged, this, [this, actionId = a.id, id] {
+                    if (!populating_)
+                        for (auto &action : active().actions)
+                            if (action.id == actionId)
+                            {
+                                action.missingInputs.remove(id);
+                                action.autoDisabled = false;
+                            }
+                    dirty();
+                });
                 table_->setCellWidget(row, 2 + col, combo);
                 table_->setColumnWidth(2 + col, 155);
             }
@@ -906,6 +925,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                     if (action.inputs.contains(id) && !FindMonitorInput(next, action.inputs.value(id)))
                     {
                         action.inputs[id] = {};
+                        action.missingInputs.remove(id);
+                        action.autoDisabled = false;
                         action.enabled = false;
                     }
             populateProfile();
@@ -1091,7 +1112,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             if (text.isEmpty())
                 return;
             HotkeySpec spec{};
-            if (ParseHotkey(text.toStdString(), spec) &&
+            if (SafeDesktopShortcut(text) && ParseHotkey(text.toStdString(), spec) &&
                 RegisterHotKey(nullptr, id, spec.fsModifiers | MOD_NOREPEAT, spec.vk))
                 hotkeys_[id] = {p.id, actionId};
             else
@@ -1106,6 +1127,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto bind = [&](const MonitorProfile &p, const QString &actionId, const QString &label,
                         const QString &text) {
             const auto profileId = p.id;
+            if (!SafeDesktopShortcut(text))
+            {
+                failed.push_back(p.name + " → " + label + " (add Ctrl, Alt or Meta)");
+                return;
+            }
             if (!kdeShortcuts_.bind(
                     shortcutId(p, actionId), p.name + " → " + label,
                     QKeySequence::fromString(text, QKeySequence::PortableText),
@@ -1568,12 +1594,17 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
 
   public:
+    bool shouldShowAtStartup(bool background, bool trayAvailable) const
+    {
+        return preview_ || configurationBlocked_ || !background || !trayAvailable;
+    }
     explicit DesktopWindow(bool preview, const QString &component = KdeShortcuts::applicationComponent())
         : kdeShortcuts_(component), preview_(preview), menu_(nullptr)
     {
         QString warning;
-        saved_ = preview ? MigrateDesktopConfig(DesktopConfig{}) : LoadDesktopWorkspace(warning);
-        configurationBlocked_ = warning.startsWith("Saved profiles could not be read.");
+        WorkspaceLoadStatus loadStatus = WorkspaceLoadStatus::Migrated;
+        saved_ = preview ? MigrateDesktopConfig(DesktopConfig{}) : LoadDesktopWorkspace(warning, {}, &loadStatus);
+        configurationBlocked_ = loadStatus == WorkspaceLoadStatus::Blocked;
         if (preview)
         {
             saved_.monitors[0].route = {"LG UltraGear · Design preview", 0, 1, true, QString(64, 'a')};
@@ -2073,7 +2104,13 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         };
         connect(up, &QAction::triggered, this, [move] { move(-1); });
         connect(down, &QAction::triggered, this, [move] { move(1); });
-        connect(table_, &QTableWidget::itemChanged, this, [this] { dirty(); });
+        connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
+            if (!populating_ && item->column() == 0)
+                for (auto &action : active().actions)
+                    if (action.id == item->data(Qt::UserRole).toString())
+                        action.autoDisabled = false; // The user now owns this choice.
+            dirty();
+        });
         connect(codes_, &QCheckBox::toggled, this, [this] {
             captureDraft();
             populateProfile();
@@ -2322,7 +2359,7 @@ int main(int argc, char **argv)
         }
     }
     DesktopWindow window(preview);
-    if (preview || !parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable())
+    if (window.shouldShowAtStartup(parser.isSet("background"), QSystemTrayIcon::isSystemTrayAvailable()))
         window.show();
     if (parser.isSet("update-ready")) {
         const auto plan = QFileInfo(parser.value("update-ready"));

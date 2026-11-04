@@ -42,7 +42,10 @@ int main() {
     Check(ParseHotkey(" ctrl + alt + f12 ", spec) && spec.fsModifiers == (MOD_CONTROL | MOD_ALT)
         && spec.vk == VK_F1 + 11, "Valid hotkey rejected");
     Check(ParseHotkey("Meta+Alt+F8", spec) && spec.fsModifiers == (MOD_WIN | MOD_ALT), "Qt Meta modifier was not mapped to the Windows key");
-    for (const auto* bad : {"CTRL+", "CTRL++A", "CTRL+A+B", "CTRL+F12junk", "CTRL+F25", "CTRL+UNKNOWN", "A+?"})
+    Check(ParseHotkey("Ctrl+Home", spec) && spec.vk == 0x24, "Navigation hotkey rejected");
+    Check(ParseHotkey("Ctrl+PgDown", spec) && spec.vk == 0x22, "Page navigation hotkey rejected");
+    Check(ParseHotkey("F8", spec) && spec.fsModifiers == 0, "Standalone function key rejected");
+    for (const auto* bad : {"A", "SHIFT+A", "1", "Home", "CTRL+", "CTRL++A", "CTRL+A+B", "CTRL+F12junk", "CTRL+F25", "CTRL+UNKNOWN", "A+?"})
         Check(!ParseHotkey(bad, spec) && spec.vk == 0, "Invalid hotkey accepted");
     std::cout << "Regression checks passed\n";
 }

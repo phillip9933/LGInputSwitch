@@ -2,6 +2,7 @@
 """Hardware-free provenance and recipe export regression."""
 import hashlib
 import importlib.util
+import shlex
 from pathlib import Path
 import subprocess
 import tarfile
@@ -15,6 +16,12 @@ spec.loader.exec_module(export)
 
 
 class Packaging(unittest.TestCase):
+    def test_configure_dependencies_available_without_checks(self):
+        recipe = (MODULE.parent.parent / 'packaging/arch/PKGBUILD.in').read_text()
+        build_dependencies = next(line for line in recipe.splitlines() if line.startswith('makedepends='))
+        dependencies = shlex.split(build_dependencies.split('(', 1)[1].rsplit(')', 1)[0])
+        self.assertIn('python', dependencies, 'CMake requires Python even when makepkg skips checks')
+
     def test_exact_committed_source_and_checksum(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

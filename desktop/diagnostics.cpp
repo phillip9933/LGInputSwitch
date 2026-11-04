@@ -96,7 +96,7 @@ QJsonObject CollectDesktopDiagnostics(const DiagnosticSnapshot &snapshot, bool p
             value = {{"read", false}};
         value["process_status"] = result.status;
         value["exit_code"] = result.exitCode;
-        if (result.output.contains("Permission denied"))
+        if (result.output.contains("Permission denied") || result.errorOutput.contains("Permission denied"))
             value["hint"] = "Check I2C device access permissions.";
         controls["0x" + code] = value;
     }

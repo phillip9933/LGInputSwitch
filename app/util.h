@@ -18,3 +18,14 @@ inline std::string AppDataDir() {
     }
     return ".";
 }
+
+// List-box labels may come from a user-edited configuration file.
+inline std::wstring ListBoxText(HWND list, int index) {
+    const auto length = SendMessageW(list, LB_GETTEXTLEN, index, 0);
+    if (length == LB_ERR) return {};
+    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+    const auto copied = SendMessageW(list, LB_GETTEXT, index, reinterpret_cast<LPARAM>(text.data()));
+    if (copied == LB_ERR) return {};
+    text.resize(static_cast<size_t>(copied));
+    return text;
+}

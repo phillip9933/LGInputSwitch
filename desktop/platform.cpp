@@ -255,7 +255,7 @@ static Discovery DiscoverPlatformMonitors()
     if (probe.status != "finished" || probe.exitCode != 0)
     {
         result.monitors.clear();
-        result.message = output.trimmed().left(1200);
+        result.message = (output + "\n" + QString::fromLocal8Bit(probe.errorOutput)).trimmed().left(1200);
     }
 #endif
     if (result.message.isEmpty())

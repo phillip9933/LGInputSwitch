@@ -6,6 +6,11 @@ manual check can be run at any time. A manual check bypasses the daily interval
 and the one-version Later dismissal. Updates never download or install silently.
 Preview mode and automated GUI fixtures do not make network requests.
 
+Failed checks retry on the next hourly timer; the daily interval starts only
+after a successful check. A verified download stays ready to install until you
+install it, choose **Later**, or quit. Checks preserve it rather than downloading
+it again.
+
 A new compatible release produces a tray notification when notifications are
 enabled. Choose **Download update** to see progress, or **Later** to dismiss that
 version. Cancelling, network timeouts and GitHub rate limits leave the installed
@@ -20,7 +25,9 @@ automatic-install candidates. The download must have the exact platform/version
 filename, uploaded state, bounded size and SHA256 digest in GitHub’s asset metadata.
 The selected version’s SHA256SUMS must itself match its GitHub digest and agree
 with the binary digest. The download is checked for exact length and SHA256 again
-before installation. Metadata, redirects, replies and execution time are bounded.
+before installation. Metadata has a three-minute deadline. Downloads retain the
+size limit and a 30-second inactivity timeout, allowing slow transfers to finish
+while stopping stalled ones. Redirect counts are bounded.
 All requests and redirects require HTTPS on fixed GitHub download hosts; TLS
 certificate verification remains enabled. No GitHub credentials or telemetry are sent.
 

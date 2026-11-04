@@ -55,20 +55,8 @@ static AppConfig Defaults() {
 // ---------- JSON helpers ----------
 
 static std::string Escape(const std::string& s) {
-    std::ostringstream o;
-    for (char c : s) {
-        switch (c) {
-        case '\"': o << "\\\""; break;
-        case '\\': o << "\\\\"; break;
-        case '\b': o << "\\b";  break;
-        case '\f': o << "\\f";  break;
-        case '\n': o << "\\n";  break;
-        case '\r': o << "\\r";  break;
-        case '\t': o << "\\t";  break;
-        default:   o << c;      break;
-        }
-    }
-    return o.str();
+    const auto encoded = json(s).dump();
+    return encoded.substr(1, encoded.size() - 2);
 }
 
 static std::string ToJson(const AppConfig& c) {

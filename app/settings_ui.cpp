@@ -252,8 +252,8 @@ static bool CollectToConfig(HWND hDlg, AppConfig& io) {
     int count = (int)SendMessage(lb, LB_GETCOUNT, 0, 0);
     io.cycleOrder.clear();
     for (int i = 0; i < count; ++i) {
-        wchar_t w[128]; SendMessage(lb, LB_GETTEXT, i, (LPARAM)w);
-        std::string s(w, w + wcslen(w));
+        const auto text = ListBoxText(lb, i);
+        std::string s(text.begin(), text.end());
         if (enabledLabels.count(s)) io.cycleOrder.push_back(s);
     }
     if (io.cycleOrder.empty()) {

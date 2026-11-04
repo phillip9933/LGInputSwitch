@@ -160,6 +160,19 @@ jobs:
       run: cmake --build build-kde --parallel 2
     - name: Run hardware-free regressions
       run: ctest --test-dir build-kde --output-on-failure
+    - name: Build qmake desktop and smoke-test entry points
+      run: |
+        mkdir build-qmake build-qmake-tests build-qmake-probe
+        cd build-qmake
+        qmake6 ../desktop/desktop.pro
+        make -j2
+        cd ../build-qmake-tests
+        qmake6 ../desktop/tests.pro
+        make -j2
+        QT_QPA_PLATFORM=offscreen ./desktop_smoke
+        cd ../build-qmake-probe
+        qmake6 ../desktop/window-probe.pro
+        make -j2
     - name: Build installable Arch and CachyOS package
       run: |
         useradd -m builder

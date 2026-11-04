@@ -105,6 +105,7 @@ to the tray when available; without a tray it quits after the unsaved-edits prom
 Since version 1.3.1, **Launch when I sign in** starts directly in the tray
 on Windows as well as Linux. No separate minimized-start setting is needed.
 Manual launches open the window; without a tray host, startup opens it too.
+Unreadable or newer settings always open a recovery window, including at sign-in.
 After upgrading from 1.3.0 on Windows, save settings once with startup enabled
 to update the existing sign-in command. Shortcuts register while the window is hidden.
 
@@ -206,7 +207,8 @@ Each write rechecks the selected Windows display and its local identity; replace
 missing or ambiguous targets are rejected. Physical monitor handles are released
 on both success and failure. Native routes are saved under profile schema 4 so
 older AMD-only builds reject them rather than treating Windows display numbers
-as AMD indices. Existing AMD/Linux setups retain schema 3 and their mappings.
+as AMD indices. AMD/Linux setups without pending input recovery retain schema 3
+and their mappings.
 
 Diagnostic report format 3 identifies each selected connection's transport and
 Windows display, automatic-input mode, known input profile, and EDID manufacturer/
@@ -231,8 +233,13 @@ files when moving the app. Additional legacy targets remain intact in the origin
 config.json. The legacy frontend does not understand profiles; avoid running both
 frontends together because startup/key ownership still overlaps.
 
-The current workspace schema is version 3 and imports version 2, adding an
-explicit automatic-input preference and disabled actions with missing mappings.
+The app reads workspace schemas 2, 3 and 4. Schema 3 adds an explicit automatic-input
+preference and disabled actions with missing mappings. Schema 4 stores native
+Windows connections and temporary input-recovery state. Inputs that disappear
+from a complete advertised list disable affected actions until their original
+input codes return, including after saving and restarting. Recovery retains
+action names, IDs and shortcuts, respects manually disabled actions, and leaves
+conflicting shortcuts disabled for review in **Edit actions**.
 Older builds reject the newer schema rather than overwriting it; restore the
 settings backup when rolling back.
 

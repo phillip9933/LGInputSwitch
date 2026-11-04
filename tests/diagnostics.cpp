@@ -15,6 +15,14 @@ int main(int argc, char **argv)
     if (app.arguments().contains("--hang")) { QThread::sleep(10); return 0; }
     if (app.arguments().contains("--fixture")) { std::cout << "fixture"; return 0; }
     if (app.arguments().contains("--large")) { std::cout << std::string(65537, 'x'); return 0; }
+    if (app.arguments().contains("--warning")) {
+        std::cerr << "Warning: synthetic diagnostic warning\n";
+        std::cout << "(vcp(60(0f 11)))";
+        return 0;
+    }
+    if (app.arguments().contains("--large-stderr")) {
+        std::cout << std::string(40000, 'x'); std::cerr << std::string(40000, 'y'); return 0;
+    }
     const auto caps = ParseDiagnosticCapabilities(
         "(prot(monitor)model(PRIVATE serial)cmds(01 02 03)"
         "vcp(10 12 14(05 08 0B) 60(11 0F 12 11 99) F4(0090 00D0))mccs_ver(2.2))");
@@ -113,6 +121,12 @@ int main(int argc, char **argv)
           "Bounded process output failed");
     Check(RunDesktopProcess(app.applicationFilePath(), {"--large"}, 3000).status == "output limit exceeded",
           "Oversized process output silently truncated");
+    const auto warning = RunDesktopProcess(app.applicationFilePath(), {"--warning"}, 3000);
+    Check(warning.errorOutput.startsWith("Warning:") &&
+              ParseDiagnosticCapabilities(warning.output)["parse_status"] == "parsed",
+          "stderr warnings contaminated the capabilities parser");
+    Check(RunDesktopProcess(app.applicationFilePath(), {"--large-stderr"}, 3000).status == "output limit exceeded",
+          "Combined stdout/stderr limit was not enforced");
     QElapsedTimer timer; timer.start();
     Check(RunDesktopProcess(app.applicationFilePath(), {"--hang"}, 100).status == "timed out",
           "Stalled diagnostic process was not stopped");
