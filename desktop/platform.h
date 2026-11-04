@@ -34,9 +34,5 @@ struct Discovery
     QVector<DesktopMonitor> monitors;
     QString message;
 };
-DesktopConfig LoadDesktopConfig(QString &warning);
-bool SaveDesktopConfig(const DesktopConfig &config, QString &error);
 Discovery DiscoverDesktopMonitors();
 lg::SwitchResult SendDesktopInput(const DesktopConfig &config, const QString &code);
-
-bool SaveDesktopShortcutPreferences(const DesktopConfig &config, QString &error);

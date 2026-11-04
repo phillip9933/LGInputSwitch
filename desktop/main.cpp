@@ -15,7 +15,7 @@
 #include <map>
 #include <memory>
 #ifdef Q_OS_WIN
-#include "../app/hotkeys.h"
+#include "windows_hotkeys.h"
 #include "../platform/windows/startup.h"
 #endif
 
@@ -1023,7 +1023,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         showResults();
         updateActions();
 #ifdef Q_OS_WIN
-        if (!SetStartWithWindows(config_.startup, true))
+        if (!SetStartWithWindows(config_.startup))
             message("Profiles saved, but Windows startup could not be updated.");
 #else
         if (!SetDesktopAutostart(config_.startup, error))

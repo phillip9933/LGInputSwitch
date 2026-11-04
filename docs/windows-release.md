@@ -16,7 +16,8 @@ upgrade. Keep them beside the replacement executable. Keep the filename and fold
 stable for future upgrades. Old Qt DLL/runtime folders are not needed by the new
 portable executable. Earlier releases remain available for rollback.
 
-The app retains its configuration import from older versions. Complete profiles
+The app retains read-only configuration import from older versions, including
+after retirement of the original Win32 frontend and Visual Studio project. Complete profiles
 are saved atomically in desktop-profiles.json; appearance preferences and update
 check preferences use the existing per-user Qt settings. No updater replaces
 settings files, changes monitor mappings or alters Windows Startup Apps policy.

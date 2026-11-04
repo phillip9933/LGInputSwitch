@@ -5,21 +5,11 @@ on:
   pull_request:
   workflow_call:
 jobs:
-  build:
+  regression-windows:
     runs-on: windows-2022
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
-    - name: Build Solution
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:OutDir=${{ github.workspace }}\BuildOutput\ LGInputSwitch.sln
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: LGInputSwitch-Build
-        path: BuildOutput\LGInputSwitch.exe
     - name: Configure regression tests
       run: cmake -S . -B build-tests -A x64
     - name: Build regression tests

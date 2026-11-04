@@ -1,17 +1,23 @@
-﻿#include "hotkeys.h"
+#include "windows_hotkeys.h"
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <charconv>
 
-static UINT ModFromToken(const std::string& t) {
+namespace {
+// RegisterHotKey modifier flags and virtual-key values, kept portable so the
+// parser can be tested without a Windows SDK or fake windows.h.
+constexpr unsigned int MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8;
+constexpr unsigned int VK_F1 = 0x70;
+}
+
+static unsigned int ModFromToken(const std::string& t) {
     if (t == "CTRL") return MOD_CONTROL;
     if (t == "ALT")  return MOD_ALT;
     if (t == "SHIFT")return MOD_SHIFT;
     if (t == "WIN" || t == "META")  return MOD_WIN;
     return 0;
 }
-static UINT VkFromToken(const std::string& t) {
+static unsigned int VkFromToken(const std::string& t) {
     if (t.size() == 1) {
         char c = t[0];
         if (c >= '0' && c <= '9') return 0x30 + (c - '0');
@@ -24,7 +30,7 @@ static UINT VkFromToken(const std::string& t) {
             f >= 1 && f <= 24) return VK_F1 + (f - 1);
     }
     // Qt PortableText names for common navigation keys. Values are Win32 VKs.
-    static const struct { const char *name; UINT key; } navigation[] = {
+    static const struct { const char *name; unsigned int key; } navigation[] = {
         {"HOME", 0x24}, {"END", 0x23}, {"LEFT", 0x25}, {"UP", 0x26},
         {"RIGHT", 0x27}, {"DOWN", 0x28}, {"PGUP", 0x21}, {"PGDOWN", 0x22},
         {"INS", 0x2d}, {"DEL", 0x2e}, {"TAB", 0x09}, {"ESC", 0x1b},
@@ -46,10 +52,10 @@ bool ParseHotkey(const std::string& spec, HotkeySpec& out) {
         auto first = tok.find_first_not_of(" \t\r\n");
         if (first == std::string::npos) return false;
         tok = tok.substr(first, tok.find_last_not_of(" \t\r\n") - first + 1);
-        UINT m = ModFromToken(tok);
+        unsigned int m = ModFromToken(tok);
         if (m) parsed.fsModifiers |= m;
         else {
-            UINT vk = VkFromToken(tok);
+            unsigned int vk = VkFromToken(tok);
             if (!vk || parsed.vk) return false;
             parsed.vk = vk;
         }

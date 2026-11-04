@@ -1,4 +1,5 @@
 #include "profiles.h"
+#include "legacy_config.h"
 #include "../core/input_value.h"
 #include "monitor_inputs.h"
 #include "input_models.h"
@@ -8,7 +9,7 @@
 #include "linux_autostart.h"
 #endif
 #ifdef Q_OS_WIN
-#include "../app/hotkeys.h"
+#include "windows_hotkeys.h"
 #endif
 
 namespace
@@ -501,7 +502,7 @@ DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePa
         if (status) *status = WorkspaceLoadStatus::Blocked;
         return MigrateDesktopConfig(DesktopConfig{});
     }
-    return MigrateDesktopConfig(LoadDesktopConfig(warning));
+    return MigrateDesktopConfig(LoadLegacyDesktopConfig(warning));
 }
 bool SaveDesktopWorkspace(const DesktopWorkspace &w, QString &error, const QString &storagePath)
 {

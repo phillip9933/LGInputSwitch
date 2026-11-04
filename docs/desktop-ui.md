@@ -1,23 +1,17 @@
 # Modern desktop frontend (Windows and Linux)
 
-The existing Windows UI uses fixed dialog units, crowded group boxes and text-only
-shortcut fields. It has no appearance policy, opens multiple modeless settings
-windows, performs monitor writes on the UI thread, and only handles right-clicks
-on its tray icon. Repainting those individual Win32 controls would duplicate the
-Linux UI and complicate dark-theme behavior.
+Windows and Linux share one Qt Widgets frontend, with system/light/dark themes,
+a tray icon, profiles and global shortcuts. The monitor glyph is drawn at multiple
+resolutions so tray and window icons scale cleanly.
 
-This increment adds an optional shared Qt Widgets frontend rather than replacing
-the maintenance executable before hardware testing. Qt 6.5+ provides system color
-scheme change notifications and cross-platform tray support. A restrained blue
-accent, clearer hierarchy, rounded cards and comfortable input rows work in both
-light and dark modes. The monitor glyph is drawn at multiple resolutions, so tray
-and window icons scale without raster stretching.
+The original Win32 frontend and its Visual Studio project have been retired.
+Older settings still import through the desktop app's read-only compatibility
+module; no separate legacy executable is built or published.
 
 ## Monitor profiles
 
-Version 1.3.0 includes monitor profiles in the modern Windows/Linux frontend.
-The legacy Win32 frontend and standalone Linux CLI retain their existing
-single-target behavior.
+The Windows/Linux desktop app supports monitor profiles. The standalone Linux
+CLI retains its single-target behavior.
 
 The top navigation contains **Profiles**, **Preferences**, **Advanced** and
 **Diagnostics**. App-wide settings are separate pages; monitor controls appear
@@ -230,8 +224,9 @@ On Windows, the modern app imports the existing `config.json` and Qt desktop
 preferences once, then saves its complete workspace in **desktop-profiles.json**
 beside the executable, using an atomic file replacement. Back up/copy both JSON
 files when moving the app. Additional legacy targets remain intact in the original
-config.json. The legacy frontend does not understand profiles; avoid running both
-frontends together because startup/key ownership still overlaps.
+config.json. The importer never writes that file. Once desktop-profiles.json exists,
+it takes precedence over the old settings. The retired frontend can be found in
+historical releases if needed for rollback.
 
 The app reads workspace schemas 2, 3 and 4. Schema 3 adds an explicit automatic-input
 preference and disabled actions with missing mappings. Schema 4 stores native
@@ -323,8 +318,8 @@ The implementation shares a bounded Qt process runner with Linux discovery,
 uses Qt's existing JSON/export facilities and adds no third-party runtime library.
 Dxva2 is provided by Windows. Qt, optional KDE shortcuts and Linux ddcutil remain
 the existing dependencies; removing those would require independently replacing
-their GUI, desktop integration and hardware handling. The Qt-free CLI and legacy
-Windows frontend are unchanged by this increment.
+their GUI, desktop integration and hardware handling. The standalone Linux CLI
+uses nlohmann/json; the desktop importer and diagnostics use Qt JSON.
 
 Windows API references (new implementation; no upstream implementation copied):
 [GetVCPFeatureAndVCPFeatureReply](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-getvcpfeatureandvcpfeaturereply)
@@ -339,8 +334,8 @@ For native KDE shortcuts, also install the KDE Frameworks 6 GlobalAccel developm
 package (`kglobalaccel` on CachyOS/Arch). CMake enables the integration when it is
 available; generic Qt builds keep working without it.
 
-Install Qt 6.5+ development packages (Widgets and Concurrent), a C++17 compiler
-and CMake. Windows Visual Studio 2022 requires CMake 3.21+.
+Install Qt 6.5+ development packages (Widgets, Concurrent and Network), a C++17
+compiler, Python 3 and CMake. Windows Visual Studio 2022 requires CMake 3.21+.
 
 ```
 cmake -S . -B build-desktop -DLG_BUILD_DESKTOP=ON
@@ -351,8 +346,9 @@ ctest --test-dir build-desktop -C Release --output-on-failure
 The executable is `LGInputSwitchDesktop` (Windows: `Release/LGInputSwitchDesktop.exe`).
 Windows releases use one portable executable with Qt/runtime and notices embedded; CI tests it alone. Linux
 needs the matching Qt runtime, desktop platform plugin and ddcutil. CMake installs
-the Linux executable, launcher and icon. The original Windows solution/executable
-and Linux CLI still build with no Qt dependency when the option is off.
+the Linux executable, launcher and icon. With the desktop option off, CMake builds
+the portable regression tests and Linux CLI without Qt. Windows builds use CMake;
+there is no separate Visual Studio solution or legacy target.
 
 For a Linux qmake-only development environment:
 
@@ -384,7 +380,7 @@ claim. Qt offscreen mode (`QT_QPA_PLATFORM=offscreen`) can render it in CI.
 Local Linux checks cover both palettes, visible rows, preview isolation, fake
 monitor discovery, explicit target selection, settings roundtrip and asynchronous
 writes to a fake ddcutil process. Existing core/backend tests remain in CI. Windows
-CI builds both executables and runs preview smoke checks; physical tray, native
+CI builds the portable desktop executable and runs preview smoke checks; physical tray, native
 shortcut capture and OS theme transitions still need manual verification.
 
 Additional real-hardware acceptance should cover system
@@ -444,3 +440,17 @@ retired actions, repeated reads, missing/empty/oversized lists, custom opt-out a
 the real Add Monitor → asynchronous read → configured-input path. Read-only checks
 on the maintainer’s connected Dell and LG confirmed different advertised lists;
 no input-switch command was sent during those checks.
+
+### Retired frontend compatibility
+
+`desktop/legacy_config.*` reads old Windows config.json and pre-profile Qt
+preferences, preserving input order/codes, disabled rows, shortcuts and appearance.
+The Windows importer uses Qt JSON, limits input to 2 MiB and never writes the
+original file. Malformed input produces defaults and a setup warning. Workspace
+saves continue to use the existing atomic, versioned profile format.
+
+`desktop/windows_hotkeys.*` contains the native Windows shortcut parser. Its
+hardware-free tests run on Windows and Linux without Windows header stubs.
+The former tray/dialog code, duplicate config writers, app_toggle wrappers,
+Visual Studio project and obsolete CI executable artifact have been removed.
+CMake and the Linux qmake entry points use the current desktop modules.
