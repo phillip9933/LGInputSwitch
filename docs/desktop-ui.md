@@ -138,7 +138,7 @@ The LG UltraFine **40U990A-W** has a model-specific **Thunderbolt** input using
 `0xD2` with **LG alternate (0xF4)** and the configured source (normally `0x50`),
 as [confirmed by the reporter of #33](https://github.com/phillip9933/LGInputSwitch/issues/33).
 The shared Windows/Linux setup recognizes this exact model from live EDID,
-ddcutil discovery or the capabilities model field. Development builds also match
+ddcutil discovery or the capabilities model field. Version 1.3.4 also matches
 the reported capabilities name `U990A` and EDID manufacturer/product **GSM / 0x9EBA**.
 The EDID name alone can be the generic `LG ULTRAFINE`, so it does not identify the
 model. The identifiers come from an owner's
@@ -177,9 +177,9 @@ input switching or will not accept it while inactive. An advertised code is
 useful evidence, not a compatibility guarantee. No automatic fallback sends both
 standard and LG commands. Protocol background: [ddcutil Input Source example](https://www.ddcutil.com/getvcp_known_u3011_output/).
 
-### Windows docks and standard connections (development)
+### Windows docks and standard connections
 
-After 1.3.3, native Windows monitor discovery also exposes monitors behind
+Version 1.3.4 adds native Windows monitor discovery for monitors behind
 DisplayLink docks and other graphics devices that AMD's interface cannot address.
 A uniquely matched AMD connection retains AMD raw access. Other connections are
 labeled **Standard DDC/CI** and use Windows' monitor API for explicit standard
