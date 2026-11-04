@@ -1,4 +1,5 @@
 #define LG_DESKTOP_TEST
+#include "../desktop/legacy_config.h"
 #include "../desktop/main.cpp"
 #include <iostream>
 struct DesktopWindowProbe
@@ -38,7 +39,7 @@ int main(int argc, char **argv)
     preferences.setValue("inputs", QJsonDocument(inputs).toJson(QJsonDocument::Compact));
     preferences.sync();
     QString warning, error;
-    auto workspace = MigrateDesktopConfig(LoadDesktopConfig(warning));
+    auto workspace = MigrateDesktopConfig(LoadLegacyDesktopConfig(warning));
     auto side = workspace.monitors[0];
     side.id = "side";
     side.name = "Side monitor";

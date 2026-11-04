@@ -15,12 +15,9 @@ int main() {
             RRF_RT_REG_SZ, &type, actual, &bytes) == ERROR_SUCCESS &&
             std::wstring(actual) == expected;
     };
-    // Legacy callers keep their existing command; modern sign-in starts in the tray.
-    bool matches = SetStartWithWindows(true) && registeredAs(quoted);
-    matches = SetStartWithWindows(true, true) && registeredAs(quoted + L" --background") && matches;
-    matches = SetStartWithWindows(true, true) && registeredAs(quoted + L" --background") && matches;
-    matches = SetStartWithWindows(true) && registeredAs(quoted) && matches;
-    if (!SetStartWithWindows(false, true)) return 2;
+    bool matches = SetStartWithWindows(true) && registeredAs(quoted + L" --background");
+    matches = SetStartWithWindows(true) && registeredAs(quoted + L" --background") && matches;
+    if (!SetStartWithWindows(false)) return 2;
     wchar_t actual[260]{};
     DWORD bytes = sizeof(actual), type = 0;
     bool removed = RegGetValueW(HKEY_CURRENT_USER,

@@ -2,6 +2,7 @@
 #include "../desktop/diagnostics.h"
 #include "../desktop/monitor_inputs.h"
 #include "../desktop/input_models.h"
+#include "../desktop/windows_monitors.h"
 #include <QApplication>
 #include <iostream>
 
@@ -46,6 +47,52 @@ static DesktopWorkspace fixture()
     }
     w.profiles.push_back(side);
     return w;
+}
+static void temporaryInputRecovery()
+{
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &monitor = w.monitors[0];
+    const auto monitorId = monitor.id;
+    const auto inputs = monitor.inputs;
+    auto &profile = w.profiles[0];
+    profile.actions[0].name = "Work PC"; // Custom scene names must survive.
+    profile.actions[0].shortcut = "CTRL+ALT+F10";
+    profile.actions[1].enabled = false;
+    const auto actionId = profile.actions[0].id;
+    const auto actionKey = profile.actions[0].shortcut;
+    auto subset = inputs.mid(2);
+    check(ApplyMonitorInputs(w, monitorId, {subset, "Synthetic subset", true}), "Missing inputs did not apply");
+    check(!profile.actions[0].enabled && profile.actions[0].autoDisabled &&
+              !profile.actions[1].enabled && !profile.actions[1].autoDisabled,
+          "Automatic retirement lost the user's enabled/disabled choice");
+    QString error;
+    DesktopWorkspace loaded;
+    check(ParseWorkspace(WorkspaceJson(w), loaded, error), "Missing-input recovery did not survive a save/load");
+    check(ApplyMonitorInputs(loaded, monitorId, {inputs, "Synthetic full list", true}), "Returning inputs did not apply");
+    const auto &restored = loaded.profiles[0].actions;
+    check(restored[0].enabled && !restored[0].autoDisabled && restored[0].id == actionId &&
+              restored[0].name == "Work PC" && restored[0].shortcut == actionKey &&
+              !restored[1].enabled && restored.size() == inputs.size(),
+          "Input return lost a custom action or re-enabled an intentionally disabled action");
+    check(ValidateWorkspace(loaded, error), qPrintable(error));
+    // A shortcut may have been assigned to another action while this one was hidden.
+    w.profiles[0].actions[2].shortcut = actionKey;
+    check(ApplyMonitorInputs(w, monitorId, {inputs, "Full list", true}) &&
+              !w.profiles[0].actions[0].enabled && w.profiles[0].actions[0].autoDisabled &&
+              ValidateWorkspace(w, error), "Recovery stole a shortcut or made the workspace invalid");
+    // Recover groups only when all of their missing mappings return.
+    auto group = fixture();
+    const auto firstId = group.monitors[0].id, secondId = group.monitors[1].id;
+    const auto firstInputs = group.monitors[0].inputs, secondInputs = group.monitors[1].inputs;
+    ApplyMonitorInputs(group, firstId, {firstInputs.mid(1), "Subset", true});
+    ApplyMonitorInputs(group, secondId, {secondInputs.mid(1), "Subset", true});
+    ApplyMonitorInputs(group, firstId, {firstInputs, "Full", true});
+    check(!group.profiles[0].actions[0].enabled, "Group re-enabled before every target returned");
+    DesktopWorkspace reloaded;
+    check(ParseWorkspace(WorkspaceJson(group), reloaded, error), qPrintable(error));
+    ApplyMonitorInputs(reloaded, secondId, {secondInputs, "Full", true});
+    check(reloaded.profiles[0].actions[0].enabled && ValidateWorkspace(reloaded, error),
+          "Grouped action did not recover after all inputs returned");
 }
 static void automaticInputs()
 {
@@ -125,11 +172,13 @@ static void thunderboltInputs()
         value["read"] = true;
         return value;
     };
-    auto edid = [](const QByteArray &model, unsigned int manufacturer = 0x1e6d) {
+    auto edid = [](const QByteArray &model, unsigned int manufacturer = 0x1e6d, int product = 0) {
         QByteArray bytes(128, '\0');
         bytes.replace(0, 8, QByteArray::fromHex("00ffffffffffff00"));
         bytes[8] = char(manufacturer >> 8);
         bytes[9] = char(manufacturer & 0xff);
+        bytes[10] = char(product & 0xff);
+        bytes[11] = char(product >> 8);
         bytes.replace(54, 5, QByteArray::fromHex("000000fc00"));
         bytes.replace(59, 13, model.leftJustified(13, ' '));
         unsigned int sum = 0;
@@ -139,8 +188,16 @@ static void thunderboltInputs()
         return bytes;
     };
     check(MonitorInputProfileFromEdid(edid("40U990A-W\n")) == Lg40U990AInputProfile &&
-              MonitorInputProfileFromEdid(edid("40U990A", 0x30e4)) == Lg40U990AInputProfile,
+              MonitorInputProfileFromEdid(edid("40U990A", 0x30e4)) == Lg40U990AInputProfile &&
+              MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x1e6d, 0x9eba)) == Lg40U990AInputProfile,
           "LG EDID model descriptor did not select the Thunderbolt profile");
+    check(MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x1e6d, 0x9ebb)).isEmpty() &&
+              MonitorInputProfileFromEdid(edid("LG ULTRAFINE", 0x10ac, 0x9eba)).isEmpty() &&
+              KnownMonitorInputProfile("LG ULTRAFINE").isEmpty(),
+          "Generic UltraFine name or another manufacturer's product selected Thunderbolt");
+    check(InputsFromCapabilities(MigrateDesktopConfig(DesktopConfig{}).monitors[0],
+              caps("(model(U990A)vcp(60(0F 10 11 12) F4))")).inputs.size() == 5,
+          "Reported U990A capabilities alias failed to select the Thunderbolt profile");
     auto corrupt = edid("40U990A-W");
     corrupt[127] = char(corrupt[127] + 1);
     check(MonitorInputProfileFromEdid(corrupt).isEmpty() &&
@@ -242,6 +299,55 @@ static void thunderboltInputs()
     check(standard.complete && standard.inputs.size() == 4 && standard.inputs[0].code == "0x0f",
           "LG Thunderbolt override changed standard DDC/CI inputs");
 }
+static void nativeProfiles()
+{
+    auto w = MigrateDesktopConfig(DesktopConfig{});
+    auto &monitor = w.monitors[0];
+    monitor.method = "standard";
+    monitor.identity = QString(64, 'a');
+    monitor.route = {"Dock monitor", -1, 6, false, monitor.identity};
+    monitor.route.transport = WindowsDdcTransport;
+    monitor.route.nativeDisplay = "\\\\.\\DISPLAY6";
+    monitor.inputs = DefaultMonitorInputs("standard");
+    auto &profile = w.profiles[0];
+    profile.actions.clear();
+    for (const auto &input : monitor.inputs)
+        profile.actions.push_back({NewDesktopId(), input.label, {}, true, {{monitor.id, input.id}}});
+    QString error;
+    check(ValidateWorkspace(w, error), qPrintable(error));
+    const auto json = WorkspaceJson(w);
+    DesktopWorkspace restored;
+    check(json["version"] == 4 && ParseWorkspace(json, restored, error) &&
+              WorkspaceJson(restored) == json && restored.monitors[0].route.transport == WindowsDdcTransport,
+          "Native connection was dropped or saved in an older schema that would misroute commands");
+    auto old = json; old["version"] = 3;
+    check(!ParseWorkspace(old, restored, error), "Native route was accepted under the old AMD-only schema");
+    Discovery live;
+    auto moved = monitor.route;
+    moved.display = 9;
+    moved.nativeDisplay = "\\\\.\\DISPLAY9";
+    live.monitors = {moved};
+    int sent = 0;
+    const auto result = SendProfileAction(w, profile.id, profile.actions[0].id, live, {}, {},
+        [&](const DesktopConfig &config, const QString &code) {
+            ++sent;
+            check(config.transport == WindowsDdcTransport && config.nativeDisplay == moved.nativeDisplay &&
+                      config.targetIdentity == monitor.identity && config.adapter == -1 && config.display == 9 &&
+                      config.source == "0x51" && code == "0x0f",
+                  "Profile lost the native target, identity or standard source after reconnect");
+            return lg::SwitchResult{lg::SwitchStatus::CommandSent, 0, "Synthetic native write"};
+        });
+    check(result.complete() && sent == 1, "Native profile did not dispatch to its live connection");
+    const auto report = ProfileCommandDiagnostics(w, result)["monitors"].toArray()[0].toObject();
+    check(report["transport"] == "windows-ddc" && report["windows_display"] == "\\\\.\\DISPLAY9",
+          "Command diagnostics did not identify the native Windows transport");
+    live.monitors[0].transport.clear(); // Same EDID, different backend must require reconnect.
+    check(!ResolveSavedMonitor(monitor, live).available,
+          "Saved native connection silently changed into an AMD connection");
+    auto invalid = w;
+    invalid.monitors[0].route.transport = "PRIVATE unsupported";
+    check(!ValidateWorkspace(invalid, error), "Unsupported transport was persisted");
+}
 int main(int argc, char **argv)
 {
     QApplication app(argc, argv);
@@ -251,7 +357,9 @@ int main(int argc, char **argv)
     check(temp.isValid(), "Temporary directory unavailable");
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temp.path());
     automaticInputs();
+    temporaryInputRecovery();
     thunderboltInputs();
+    nativeProfiles();
     DesktopConfig legacy;
     legacy.adapter = 4;
     legacy.display = 5;
@@ -287,14 +395,16 @@ int main(int argc, char **argv)
     const auto storage = temp.filePath("profiles.json");
     check(SaveDesktopWorkspace(w, error, storage), "Atomic profile save failed");
     QString warning;
-    const auto loaded = LoadDesktopWorkspace(warning, storage);
+    WorkspaceLoadStatus loadStatus;
+    const auto loaded = LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Loaded, "Successful load status missing");
     check(warning.isEmpty() && WorkspaceJson(w) == WorkspaceJson(loaded), "Saved workspace did not load");
     QFile corrupt(storage);
     check(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate), "Corrupt fixture failed");
     corrupt.write("{broken");
     corrupt.close();
-    LoadDesktopWorkspace(warning, storage);
-    check(warning.startsWith("Saved profiles could not be read."), "Corrupt config did not block switching");
+    LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Blocked, "Corrupt config did not block switching");
     error.clear();
     check(!SaveDesktopWorkspace(w, error, storage), "Corrupt config was overwritten");
     check(corrupt.open(QIODevice::ReadOnly) && corrupt.readAll() == "{broken",
@@ -303,6 +413,19 @@ int main(int argc, char **argv)
     auto json = WorkspaceJson(w);
     json["version"] = 999;
     check(!ParseWorkspace(json, parsed, error), "Future schema was accepted");
+    check(corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate), "Future fixture unavailable");
+    corrupt.write(QJsonDocument(json).toJson()); corrupt.close();
+    LoadDesktopWorkspace(warning, storage, &loadStatus);
+    check(loadStatus == WorkspaceLoadStatus::Blocked && !SaveDesktopWorkspace(w, error, storage),
+          "Future configuration was not protected");
+    check(SafeDesktopShortcut("F8") && SafeDesktopShortcut("Ctrl+Home") &&
+              !SafeDesktopShortcut("A") && !SafeDesktopShortcut("Shift+A"),
+          "Unsafe typing shortcuts were accepted");
+    auto unsafe = w;
+    unsafe.profiles[0].actions[0].shortcut = "A";
+    check(ParseWorkspace(WorkspaceJson(unsafe), parsed, error), "Old unsafe shortcut blocked profile recovery");
+    check(!SaveDesktopWorkspace(unsafe, error, temp.filePath("unsafe.json")) && error.contains("Ctrl, Alt or Meta"),
+          "Unsafe shortcut was saved or its repair message was unclear");
     auto bad = w;
     bad.profiles[1].actions[0].shortcut = bad.profiles[0].actions[0].shortcut;
     check(!ValidateWorkspace(bad, error), "Cross-profile shortcut conflict accepted");
@@ -370,6 +493,13 @@ int main(int argc, char **argv)
     };
     const auto profileId = w.profiles[0].id, firstAction = w.profiles[0].actions[0].id,
                secondAction = w.profiles[0].actions[1].id;
+    const QString backendError = "ddcutil is unavailable. Install ddcutil and try again.";
+    const auto unavailable = SendProfileAction(w, profileId, firstAction, discovery, {}, {},
+        [](const DesktopConfig &, const QString &) -> lg::SwitchResult {
+            check(false, "Unavailable discovery reached the sender"); return {};
+        }, [&] { return Discovery{{}, backendError}; });
+    check(!unavailable.monitors.isEmpty() && unavailable.monitors[0].status == backendError,
+          "Discovery failure was replaced with a misleading identity error");
     auto first = SendProfileAction(w, profileId, firstAction, discovery, {}, {}, sender);
     check(first.complete() && sends.size() == 2 && sends[0] == qMakePair(17, QString("0xD0")) &&
               sends[1] == qMakePair(9, QString("0x11")),

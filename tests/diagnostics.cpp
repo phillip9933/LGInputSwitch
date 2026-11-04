@@ -1,5 +1,7 @@
 #include "../desktop/diagnostics.h"
 #include "../desktop/process.h"
+#include "../desktop/input_models.h"
+#include "../desktop/windows_monitors.h"
 #include <iostream>
 
 static void Check(bool condition, const char *message)
@@ -13,6 +15,14 @@ int main(int argc, char **argv)
     if (app.arguments().contains("--hang")) { QThread::sleep(10); return 0; }
     if (app.arguments().contains("--fixture")) { std::cout << "fixture"; return 0; }
     if (app.arguments().contains("--large")) { std::cout << std::string(65537, 'x'); return 0; }
+    if (app.arguments().contains("--warning")) {
+        std::cerr << "Warning: synthetic diagnostic warning\n";
+        std::cout << "(vcp(60(0f 11)))";
+        return 0;
+    }
+    if (app.arguments().contains("--large-stderr")) {
+        std::cout << std::string(40000, 'x'); std::cerr << std::string(40000, 'y'); return 0;
+    }
     const auto caps = ParseDiagnosticCapabilities(
         "(prot(monitor)model(PRIVATE serial)cmds(01 02 03)"
         "vcp(10 12 14(05 08 0B) 60(11 0F 12 11 99) F4(0090 00D0))mccs_ver(2.2))");
@@ -75,6 +85,26 @@ int main(int argc, char **argv)
     snapshot.config.inputs = {{"PRIVATE serial label", "not PRIVATE", "PRIVATE shortcut", true}};
     const auto text = FormatDesktopDiagnostics(snapshot, CollectDesktopDiagnostics(snapshot, true), true);
     Check(!text.contains("PRIVATE") && !text.contains("/home/example"), "Report exported private config text");
+    DiagnosticMonitorSnapshot dock;
+    dock.config.transport = WindowsDdcTransport;
+    dock.config.nativeDisplay = "\\\\.\\DISPLAY6";
+    dock.config.targetIdentity = "PRIVATE";
+    dock.selected = true;
+    dock.inputProfile = Lg40U990AInputProfile;
+    dock.hardware = {{"edid_valid", true}, {"manufacturer", "GSM"}, {"product_code", 0x9eba},
+                     {"serial", "PRIVATE"}, {"raw_edid", "PRIVATE"}, {"model", "PRIVATE"},
+                     {"input_profile", Lg40U990AInputProfile}, {"profile_match", "edid-product"}};
+    snapshot.monitors = {dock};
+    auto dockReport = FormatDesktopDiagnostics(snapshot, {}, true);
+    const auto dockJson = QJsonDocument::fromJson(dockReport.toUtf8()).object();
+    const auto dockMonitor = dockJson["profile_monitors"].toArray()[0].toObject();
+    Check(!dockReport.contains("PRIVATE") && dockJson["report_format"] == 3 &&
+              dockMonitor["hardware"].toObject()["product_code"] == "0x9eba" &&
+              dockMonitor["target"].toObject()["transport"] == "windows-ddc" &&
+              dockMonitor["target"].toObject()["windows_display"] == "\\\\.\\DISPLAY6" &&
+              dockMonitor["lg_alternate_transport_supported"] == false,
+          "Dock diagnostics lost route/model information or leaked private identity fields");
+    snapshot.monitors.clear();
     const auto report = QJsonDocument::fromJson(text.toUtf8()).object();
     Check(report["source_address"] == "invalid" && report["settings_unsaved"].toBool(),
           "Invalid source or unsaved state lost");
@@ -91,6 +121,12 @@ int main(int argc, char **argv)
           "Bounded process output failed");
     Check(RunDesktopProcess(app.applicationFilePath(), {"--large"}, 3000).status == "output limit exceeded",
           "Oversized process output silently truncated");
+    const auto warning = RunDesktopProcess(app.applicationFilePath(), {"--warning"}, 3000);
+    Check(warning.errorOutput.startsWith("Warning:") &&
+              ParseDiagnosticCapabilities(warning.output)["parse_status"] == "parsed",
+          "stderr warnings contaminated the capabilities parser");
+    Check(RunDesktopProcess(app.applicationFilePath(), {"--large-stderr"}, 3000).status == "output limit exceeded",
+          "Combined stdout/stderr limit was not enforced");
     QElapsedTimer timer; timer.start();
     Check(RunDesktopProcess(app.applicationFilePath(), {"--hang"}, 100).status == "timed out",
           "Stalled diagnostic process was not stopped");

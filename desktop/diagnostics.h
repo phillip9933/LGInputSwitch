@@ -6,6 +6,9 @@ struct DiagnosticMonitorSnapshot
     DesktopConfig config;
     bool selected = false;
     int monitorIndex = -1;
+    QJsonObject hardware;
+    QString inputProfile;
+    bool autoInputs = true;
 };
 
 struct DiagnosticSnapshot

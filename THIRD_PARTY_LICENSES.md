@@ -8,7 +8,8 @@ This project incorporates or was inspired by the following:
 - Preserve the full notices in these headers and `licenses/AMD-ADL-MIT.txt`.
 - AMD driver runtime DLLs are loaded from the installed driver and are not bundled.
 
-## nlohmann/json
+## nlohmann/json (standalone Linux CLI)
+- The standalone Linux CLI uses this parser; the desktop app and its settings importer use Qt JSON.
 - License: MIT (bundled version 3.12.0); full text: `licenses/nlohmann-json-MIT.txt`.
 - Source: https://github.com/nlohmann/json/tree/v3.12.0
 - Preserve embedded attribution: Niels Lohmann, Björn Hoehrmann, Florian Loitsch,
@@ -35,7 +36,7 @@ This project incorporates or was inspired by the following:
 ## Qt 6 (optional desktop frontend)
 - The Windows portable app statically links Qt Widgets, GUI, Core, Concurrent and Network. Linux uses the distribution’s shared Qt libraries.
 - Qt is available under commercial and open-source licenses; see https://www.qt.io/licensing/ and https://doc.qt.io/qt-6/licenses.html .
-- Qt source is available at the pinned official URL in packaging/windows/qt-sources.json and release notes. The Windows EXE embeds license/attribution and rebuild instructions, exportable with --licenses. The legacy Windows executable and Linux CLI do not depend on Qt.
+- Qt source is available at the pinned official URL in packaging/windows/qt-sources.json and release notes. The Windows EXE embeds license/attribution and rebuild instructions, exportable with --licenses. The standalone Linux CLI does not depend on Qt. The retired Windows frontend is no longer built.
 
 ## KDE Frameworks KGlobalAccel (optional KDE shortcuts)
 - Dynamically linked when available; no source is vendored.

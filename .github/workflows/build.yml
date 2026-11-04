@@ -5,21 +5,11 @@ on:
   pull_request:
   workflow_call:
 jobs:
-  build:
+  regression-windows:
     runs-on: windows-2022
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
-    - name: Build Solution
-      working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:OutDir=${{ github.workspace }}\BuildOutput\ LGInputSwitch.sln
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: LGInputSwitch-Build
-        path: BuildOutput\LGInputSwitch.exe
     - name: Configure regression tests
       run: cmake -S . -B build-tests -A x64
     - name: Build regression tests
@@ -109,7 +99,7 @@ jobs:
         QT_QPA_PLATFORM: windows
         QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES: '1'
       run: |
-        $executable = (Resolve-Path ./build-windows-release/LGInputSwitch-1.3.3-Windows-x64.exe).Path
+        $executable = (Resolve-Path ./build-windows-release/LGInputSwitch-1.3.4-Windows-x64.exe).Path
         $dependencies = & dumpbin /dependents $executable
         if ($LASTEXITCODE -ne 0) { throw 'PE dependency inspection failed' }
         if ($dependencies -match '(?i)Qt[0-9].*\.dll|vcruntime.*\.dll|msvcp.*\.dll|libssl.*\.dll|libcrypto.*\.dll') { throw 'Portable app still imports an external runtime' }
@@ -121,7 +111,7 @@ jobs:
         $env:QT_QPA_PLATFORM_PLUGIN_PATH = ''
         $env:QML2_IMPORT_PATH = ''
         $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion
-        if ($version -ne '1.3.3') { throw "Wrong product version: $version" }
+        if ($version -ne '1.3.4') { throw "Wrong product version: $version" }
         $process = Start-Process -FilePath $executable -ArgumentList '--version' -Wait -PassThru
         if ($process.ExitCode -ne 0) { throw 'Portable version check failed' }
         $process = Start-Process -FilePath $executable -ArgumentList '--preview','--screenshot-dir','packaged-previews' -Wait -PassThru
@@ -132,7 +122,7 @@ jobs:
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
-        name: LGInputSwitch-Windows-1.3.3
+        name: LGInputSwitch-Windows-1.3.4
         path: |
           build-windows-release/*.exe
           build-windows-release/SOURCE_REVISION
@@ -160,6 +150,19 @@ jobs:
       run: cmake --build build-kde --parallel 2
     - name: Run hardware-free regressions
       run: ctest --test-dir build-kde --output-on-failure
+    - name: Build qmake desktop and smoke-test entry points
+      run: |
+        mkdir build-qmake build-qmake-tests build-qmake-probe
+        cd build-qmake
+        qmake6 ../desktop/desktop.pro
+        make -j2
+        cd ../build-qmake-tests
+        qmake6 ../desktop/tests.pro
+        make -j2
+        QT_QPA_PLATFORM=offscreen ./desktop_smoke
+        cd ../build-qmake-probe
+        qmake6 ../desktop/window-probe.pro
+        make -j2
     - name: Build installable Arch and CachyOS package
       run: |
         useradd -m builder

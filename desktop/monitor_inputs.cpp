@@ -2,14 +2,10 @@
 #include "../core/input_value.h"
 #include "diagnostics.h"
 #include "input_models.h"
+#include "windows_monitors.h"
 #include "process.h"
 #ifdef Q_OS_WIN
 #include "../platform/windows/adl_session.h"
-#include <lowlevelmonitorconfigurationapi.h>
-#include <physicalmonitorenumerationapi.h>
-#include <setupapi.h>
-#include <vector>
-#include <windows.h>
 #endif
 
 namespace
@@ -214,10 +210,10 @@ MonitorInputRead InputsFromCapabilities(const SavedMonitor &m, const QJsonObject
 QJsonObject ReadMonitorCapabilities(const DesktopMonitor &target)
 {
 #ifdef Q_OS_WIN
-    const auto process = RunDesktopProcess(
-        QCoreApplication::applicationFilePath(),
-        {"--input-probe", QString::number(target.adapter), QString::number(target.display), target.identity},
-        15000);
+    const QStringList arguments = target.transport == WindowsDdcTransport
+        ? QStringList{"--windows-input-probe", target.nativeDisplay, target.identity}
+        : QStringList{"--input-probe", QString::number(target.adapter), QString::number(target.display), target.identity};
+    const auto process = RunDesktopProcess(QCoreApplication::applicationFilePath(), arguments, 15000);
     if (process.status == "finished" && process.exitCode == 0)
     {
         const auto doc = QJsonDocument::fromJson(process.output);
@@ -273,23 +269,31 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
             continue;
         for (auto &action : profile.actions)
         {
-            if (!FindMonitorInput(*m, action.inputs.value(id)))
+            if (FindMonitorInput(*m, action.inputs.value(id)))
+                continue;
+            const auto before = action.inputs.value(id);
+            QString missing = action.missingInputs.value(id);
+            if (missing.isEmpty())
+                for (const auto &old : oldInputs)
+                    if (old.id == before)
+                        missing = old.code;
+            unsigned int code;
+            const auto *match = Value(missing, code) ? ByValue(m->inputs, code) : nullptr;
+            if (match)
             {
-                const auto before = action.inputs.value(id);
-                const bool wasEnabled = action.enabled;
-                const DesktopInput *match = nullptr;
-                for (const auto &input : m->inputs)
-                    if (InputNameKey(action.name) == InputNameKey(input.label))
-                        match = &input;
-                if (match)
-                    action.inputs[id] = match->id;
-                else
-                {
-                    action.inputs[id] = {};
-                    action.enabled = false;
-                }
-                changed = changed || before != action.inputs.value(id) || wasEnabled != action.enabled;
+                action.inputs[id] = match->id;
+                action.missingInputs.remove(id);
             }
+            else
+            {
+                if (!missing.isEmpty())
+                    action.missingInputs[id] = missing;
+                action.inputs[id].clear();
+                if (action.enabled)
+                    action.autoDisabled = true;
+                action.enabled = false;
+            }
+            changed = changed || before != action.inputs.value(id);
         }
         if (profile.monitors.size() != 1)
             continue;
@@ -299,141 +303,51 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
             for (const auto &action : profile.actions)
                 if (action.inputs.value(id) == input.id)
                     exists = true;
-            if (exists)
-                continue;
-            // Restore a matching retired action without discarding its key/ID.
-            bool restored = false;
-            for (auto &action : profile.actions)
-                if (!action.enabled && action.inputs.value(id).isEmpty() &&
-                    InputNameKey(action.name) == InputNameKey(input.label))
-                {
-                    action.inputs[id] = input.id;
-                    restored = true;
-                    changed = true;
-                    break;
-                }
-            if (!restored && profile.actions.size() < 64)
+            if (!exists && profile.actions.size() < 64)
             {
-                profile.actions.push_back({NewDesktopId(), input.label, {}, true, {{id, input.id}}});
+                QString name = input.label;
+                auto used = [&](const QString &label) {
+                    for (const auto &action : profile.actions)
+                        if (action.name == label) return true;
+                    return false;
+                };
+                for (int suffix = 2; used(name); ++suffix)
+                    name = input.label + QString(" (%1)").arg(suffix);
+                profile.actions.push_back({NewDesktopId(), name, {}, true, {{id, input.id}}});
                 changed = true;
             }
         }
-        bool enabled = false;
-        for (const auto &action : profile.actions)
-            if (action.enabled)
-                enabled = true;
-        if (!enabled)
-            for (auto &action : profile.actions)
-                if (FindMonitorInput(*m, action.inputs.value(id)))
-                {
-                    action.enabled = true;
-                    break;
-                }
     }
+    // Restore only actions disabled by discovery, once every group member has
+    // its mapping back. Never reactivate an intentionally disabled action or
+    // steal a shortcut assigned elsewhere while this input was absent.
+    for (auto &profile : w.profiles)
+        for (auto &action : profile.actions)
+            if (action.autoDisabled && action.missingInputs.isEmpty())
+            {
+                bool complete = true;
+                for (const auto &member : profile.monitors)
+                {
+                    const auto *monitor = FindMonitor(w, member);
+                    complete = complete && monitor && FindMonitorInput(*monitor, action.inputs.value(member));
+                }
+                if (!complete) continue;
+                action.enabled = true;
+                action.autoDisabled = false;
+                QString error;
+                if (!ValidateWorkspace(w, error))
+                {
+                    action.enabled = false;
+                    action.autoDisabled = true;
+                    m->inputStatus += " An action needs review in Edit actions: " + error;
+                }
+                else
+                    changed = true;
+            }
     return changed;
 }
 
 #ifdef Q_OS_WIN
-namespace
-{
-QString InterfaceIdentity(const wchar_t *path)
-{
-    const auto set = SetupDiCreateDeviceInfoList(nullptr, nullptr);
-    if (set == INVALID_HANDLE_VALUE)
-        return {};
-    SP_DEVICE_INTERFACE_DATA interfaceData{};
-    interfaceData.cbSize = sizeof(interfaceData);
-    SP_DEVINFO_DATA device{};
-    device.cbSize = sizeof(device);
-    QString identity;
-    if (SetupDiOpenDeviceInterfaceW(set, path, 0, &interfaceData))
-    {
-        DWORD bytes = 0;
-        SetupDiGetDeviceInterfaceDetailW(set, &interfaceData, nullptr, 0, &bytes, nullptr);
-        if (bytes >= sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) && bytes <= 65536)
-        {
-            std::vector<unsigned char> buffer(bytes);
-            auto *detail = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W *>(buffer.data());
-            detail->cbSize = sizeof(*detail);
-            if (SetupDiGetDeviceInterfaceDetailW(set, &interfaceData, detail, bytes, nullptr, &device))
-            {
-                const auto key =
-                    SetupDiOpenDevRegKey(set, &device, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_QUERY_VALUE);
-                if (key != INVALID_HANDLE_VALUE)
-                {
-                    DWORD length = 0, type = 0;
-                    if (RegQueryValueExW(key, L"EDID", nullptr, &type, nullptr, &length) == ERROR_SUCCESS &&
-                        type == REG_BINARY && length >= 128 && length <= 16384)
-                    {
-                        QByteArray edid(int(length), '\0');
-                        if (RegQueryValueExW(key, L"EDID", nullptr, &type,
-                                             reinterpret_cast<BYTE *>(edid.data()),
-                                             &length) == ERROR_SUCCESS &&
-                            type == REG_BINARY)
-                            identity = MonitorIdentity(edid.left(int(length)));
-                    }
-                    RegCloseKey(key);
-                }
-            }
-        }
-    }
-    SetupDiDestroyDeviceInfoList(set);
-    return identity;
-}
-struct TargetProbe
-{
-    QString identity;
-    int matches = 0, displays = 0;
-    QJsonObject caps;
-};
-BOOL CALLBACK TargetDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM raw)
-{
-    auto &probe = *reinterpret_cast<TargetProbe *>(raw);
-    if (++probe.displays > 32)
-        return FALSE;
-    MONITORINFOEXW info{};
-    info.cbSize = sizeof(info);
-    if (!GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO *>(&info)))
-        return TRUE;
-    QStringList identities;
-    for (DWORD index = 0; index < 16; ++index)
-    {
-        DISPLAY_DEVICEW device{};
-        device.cb = sizeof(device);
-        if (!EnumDisplayDevicesW(info.szDevice, index, &device, EDD_GET_DEVICE_INTERFACE_NAME))
-            break;
-        if (!(device.StateFlags & DISPLAY_DEVICE_ACTIVE))
-            continue;
-        identities.push_back(InterfaceIdentity(device.DeviceID));
-    }
-    // Neither physical-handle ordering nor an AMD index is a Windows index.
-    if (identities.size() != 1 || identities.front() != probe.identity)
-        return TRUE;
-    ++probe.matches;
-    DWORD count = 0;
-    if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &count) || count != 1)
-        return TRUE;
-    PHYSICAL_MONITOR physical{};
-    if (!GetPhysicalMonitorsFromHMONITOR(monitor, 1, &physical))
-        return TRUE;
-    DWORD length = 0;
-    if (GetCapabilitiesStringLength(physical.hPhysicalMonitor, &length) && length > 0 && length <= 65536)
-    {
-        QByteArray text(int(length), '\0');
-        if (CapabilitiesRequestAndCapabilitiesReply(physical.hPhysicalMonitor, text.data(), length))
-        {
-            const auto end = text.indexOf('\0');
-            if (end >= 0)
-            {
-                probe.caps = ParseDiagnosticCapabilities(text.left(end));
-                probe.caps["read"] = true;
-            }
-        }
-    }
-    DestroyPhysicalMonitors(1, &physical);
-    return TRUE;
-}
-} // namespace
 QJsonObject ProbeTargetCapabilities(int adapter, int display, const QString &expectedIdentity)
 {
     if (adapter < 0 || display < 0 || !InitializeAdl() || !Adl().edid)
@@ -443,18 +357,16 @@ QJsonObject ProbeTargetCapabilities(int adapter, int display, const QString &exp
     if (Adl().edid(adapter, display, &data) != ADL_OK || data.iEDIDSize < 128 ||
         data.iEDIDSize > ADL_MAX_EDIDDATA_SIZE)
         return {{"read", false}};
-    const auto identity = MonitorIdentity(QByteArray(data.cEDIDData, data.iEDIDSize));
+    const QByteArray edid(data.cEDIDData, data.iEDIDSize);
+    const auto identity = MonitorIdentity(edid);
     if (identity.isEmpty() || (!expectedIdentity.isEmpty() && identity != expectedIdentity))
         return {{"read", false}};
-    TargetProbe probe;
-    probe.identity = identity;
-    EnumDisplayMonitors(nullptr, nullptr, TargetDisplay, reinterpret_cast<LPARAM>(&probe));
-    if (probe.matches != 1 || probe.caps.isEmpty())
-        return {{"read", false}, {"status", "ambiguous or unavailable native mapping"}};
-    const unsigned int manufacturer =
-        (static_cast<unsigned char>(data.cEDIDData[8]) << 8) | static_cast<unsigned char>(data.cEDIDData[9]);
-    if (manufacturer == 0x10ac)
-        probe.caps["manufacturer"] = "DEL";
-    return probe.caps;
+    auto caps = ProbeNativeWindowsCapabilities({}, identity);
+    const auto hardware = MonitorEdidHardware(edid);
+    caps["hardware"] = hardware;
+    caps["manufacturer"] = hardware["manufacturer"];
+    if (!hardware["input_profile"].toString().isEmpty())
+        caps["input_profile"] = hardware["input_profile"];
+    return caps;
 }
 #endif

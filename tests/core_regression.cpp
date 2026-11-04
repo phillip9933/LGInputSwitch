@@ -41,6 +41,9 @@ int main()
                             lg::InputCommand{0x50, 0xf4, 0x10000}})
         Check(!lg::EncodeDdcWrite(bad), "Invalid wire packet accepted");
     FakeTransport transport;
+    for (const auto *bad : {"", "0x", "-1", "+1", "0x90junk", "65536", "99999999999999999999999"})
+        Check(lg::SwitchInput(transport, "0x50", bad).status == lg::SwitchStatus::InvalidArgument &&
+                  transport.commands.empty(), "Malformed input reached the transport");
     auto invalid = lg::SwitchInput(transport, "0x150", "0x90");
     Check(invalid.status == lg::SwitchStatus::InvalidArgument && transport.commands.empty(),
           "Invalid command reached backend");

@@ -4,6 +4,7 @@
 #include "kde_shortcuts.h"
 #include "monitor_inputs.h"
 #include "profiles.h"
+#include "windows_monitors.h"
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
 #endif
@@ -14,7 +15,7 @@
 #include <map>
 #include <memory>
 #ifdef Q_OS_WIN
-#include "../app/hotkeys.h"
+#include "windows_hotkeys.h"
 #include "../platform/windows/startup.h"
 #endif
 
@@ -143,16 +144,23 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         {
             ProfileAction a;
             a.id = table_->item(row, 0)->data(Qt::UserRole).toString();
+            for (const auto &previous : p.actions)
+                if (previous.id == a.id)
+                    a = previous;
             a.name = table_->item(row, 1)->text().trimmed();
             a.enabled = table_->item(row, 0)->checkState() == Qt::Checked;
             for (int i = 0; i < p.monitors.size(); ++i)
             {
                 auto *combo = qobject_cast<QComboBox *>(table_->cellWidget(row, 2 + i));
                 const auto *item = table_->item(row, 2 + i);
+                const auto before = a.inputs.value(p.monitors[i]);
                 a.inputs[p.monitors[i]] = combo  ? combo->currentData().toString()
                                           : item ? item->data(Qt::UserRole).toString()
                                                  : QString{};
+                if (before != a.inputs.value(p.monitors[i]))
+                    a.missingInputs.remove(p.monitors[i]);
             }
+            if (a.enabled) a.autoDisabled = false;
             auto *key = qobject_cast<QKeySequenceEdit *>(table_->cellWidget(row, 2 + p.monitors.size()));
             const auto *keyItem = table_->item(row, 2 + p.monitors.size());
             a.shortcut = key       ? key->keySequence().toString(QKeySequence::PortableText).toUpper()
@@ -358,7 +366,10 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 captureDraft();
                 active().monitors.removeAll(id);
                 for (auto &a : active().actions)
+                {
                     a.inputs.remove(id);
+                    a.missingInputs.remove(id);
+                }
                 dirty();
                 populateProfile();
             });
@@ -456,7 +467,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                                                            : input.label,
                                        input.id);
                 combo->setCurrentIndex(combo->findData(a.inputs.value(id)));
-                connect(combo, &QComboBox::currentIndexChanged, this, [this] { dirty(); });
+                connect(combo, &QComboBox::currentIndexChanged, this, [this, actionId = a.id, id] {
+                    if (!populating_)
+                        for (auto &action : active().actions)
+                            if (action.id == actionId)
+                            {
+                                action.missingInputs.remove(id);
+                                action.autoDisabled = false;
+                            }
+                    dirty();
+                });
                 table_->setCellWidget(row, 2 + col, combo);
                 table_->setColumnWidth(2 + col, 155);
             }
@@ -684,6 +704,12 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                        "depend on the monitor. After changing methods, review the codes or load presets; "
                        "custom LG codes are not translated automatically.");
         methodHint->setWordWrap(true);
+        const auto connection = ResolveSavedMonitor(next, discovery_, confirmed_);
+        if (connection.available && connection.target.transport == WindowsDdcTransport)
+            methodHint->setText("This connection supports standard DDC/CI (0x60). LG alternate switching "
+                "needs a custom source address that Windows DDC/CI cannot send through this connection. "
+                "To test standard switching, select Standard and load its method presets. "
+                "Some LG monitors only support alternate switching through a direct GPU connection.");
         form->addRow(methodHint);
         layout->addLayout(form);
         auto *automatic = new QCheckBox("Read and set up this monitor’s inputs automatically");
@@ -899,6 +925,8 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                     if (action.inputs.contains(id) && !FindMonitorInput(next, action.inputs.value(id)))
                     {
                         action.inputs[id] = {};
+                        action.missingInputs.remove(id);
+                        action.autoDisabled = false;
                         action.enabled = false;
                     }
             populateProfile();
@@ -995,7 +1023,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         showResults();
         updateActions();
 #ifdef Q_OS_WIN
-        if (!SetStartWithWindows(config_.startup, true))
+        if (!SetStartWithWindows(config_.startup))
             message("Profiles saved, but Windows startup could not be updated.");
 #else
         if (!SetDesktopAutostart(config_.startup, error))
@@ -1084,7 +1112,7 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
             if (text.isEmpty())
                 return;
             HotkeySpec spec{};
-            if (ParseHotkey(text.toStdString(), spec) &&
+            if (SafeDesktopShortcut(text) && ParseHotkey(text.toStdString(), spec) &&
                 RegisterHotKey(nullptr, id, spec.fsModifiers | MOD_NOREPEAT, spec.vk))
                 hotkeys_[id] = {p.id, actionId};
             else
@@ -1099,6 +1127,11 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         auto bind = [&](const MonitorProfile &p, const QString &actionId, const QString &label,
                         const QString &text) {
             const auto profileId = p.id;
+            if (!SafeDesktopShortcut(text))
+            {
+                failed.push_back(p.name + " → " + label + " (add Ctrl, Alt or Meta)");
+                return;
+            }
             if (!kdeShortcuts_.bind(
                     shortcutId(p, actionId), p.name + " → " + label,
                     QKeySequence::fromString(text, QKeySequence::PortableText),
@@ -1326,11 +1359,16 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
                 c.method = m->method;
                 c.source = m->method == "standard" ? "0x51" : m->source;
                 c.inputs = m->inputs;
+                const auto route = resolution.available ? resolution.target : m->route;
+                c.transport = route.transport;
+                c.nativeDisplay = route.nativeDisplay;
+                c.targetIdentity = route.identity;
                 int index = -1;
                 for (int i = 0; i < draft_.monitors.size(); ++i)
                     if (draft_.monitors[i].id == id)
                         index = i;
-                snapshot.monitors.push_back({c, resolution.available, index});
+                snapshot.monitors.push_back({c, resolution.available, index, route.hardware,
+                                             route.inputProfile, m->autoInputs});
             }
         for (const auto &action : active().actions)
         {
@@ -1556,12 +1594,17 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
     }
 
   public:
+    bool shouldShowAtStartup(bool background, bool trayAvailable) const
+    {
+        return preview_ || configurationBlocked_ || !background || !trayAvailable;
+    }
     explicit DesktopWindow(bool preview, const QString &component = KdeShortcuts::applicationComponent())
         : kdeShortcuts_(component), preview_(preview), menu_(nullptr)
     {
         QString warning;
-        saved_ = preview ? MigrateDesktopConfig(DesktopConfig{}) : LoadDesktopWorkspace(warning);
-        configurationBlocked_ = warning.startsWith("Saved profiles could not be read.");
+        WorkspaceLoadStatus loadStatus = WorkspaceLoadStatus::Migrated;
+        saved_ = preview ? MigrateDesktopConfig(DesktopConfig{}) : LoadDesktopWorkspace(warning, {}, &loadStatus);
+        configurationBlocked_ = loadStatus == WorkspaceLoadStatus::Blocked;
         if (preview)
         {
             saved_.monitors[0].route = {"LG UltraGear · Design preview", 0, 1, true, QString(64, 'a')};
@@ -2061,7 +2104,13 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
         };
         connect(up, &QAction::triggered, this, [move] { move(-1); });
         connect(down, &QAction::triggered, this, [move] { move(1); });
-        connect(table_, &QTableWidget::itemChanged, this, [this] { dirty(); });
+        connect(table_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
+            if (!populating_ && item->column() == 0)
+                for (auto &action : active().actions)
+                    if (action.id == item->data(Qt::UserRole).toString())
+                        action.autoDisabled = false; // The user now owns this choice.
+            dirty();
+        });
         connect(codes_, &QCheckBox::toggled, this, [this] {
             captureDraft();
             populateProfile();
@@ -2216,6 +2265,18 @@ class DesktopWindow final : public QWidget, public QAbstractNativeEventFilter
 int main(int argc, char **argv)
 {
 #ifdef Q_OS_WIN
+    if ((argc == 2 && std::strcmp(argv[1], "--windows-discovery") == 0) ||
+        (argc == 4 && std::strcmp(argv[1], "--windows-input-probe") == 0) ||
+        (argc == 5 && std::strcmp(argv[1], "--windows-switch") == 0))
+    {
+        QCoreApplication app(argc, argv);
+        const auto arguments = app.arguments();
+        const auto result = argc == 2 ? ProbeNativeWindowsDiscovery()
+            : argc == 4 ? ProbeNativeWindowsCapabilities(arguments[2], arguments[3])
+                        : ProbeNativeWindowsSwitch(arguments[2], arguments[3], arguments[4]);
+        std::cout << QJsonDocument(result).toJson(QJsonDocument::Compact).constData();
+        return 0;
+    }
     if (argc == 5 && std::strcmp(argv[1], "--input-probe") == 0)
     {
         QCoreApplication app(argc, argv);
@@ -2255,7 +2316,7 @@ int main(int argc, char **argv)
     QApplication app(argc, argv);
     app.setOrganizationName("LGInputSwitch");
     app.setApplicationName("LGInputSwitchDesktop");
-    app.setApplicationVersion("1.3.3");
+    app.setApplicationVersion("1.3.4");
     app.setDesktopFileName("lginputswitch");
     app.setQuitOnLastWindowClosed(false);
     app.setStyle("Fusion");
@@ -2298,7 +2359,7 @@ int main(int argc, char **argv)
         }
     }
     DesktopWindow window(preview);
-    if (preview || !parser.isSet("background") || !QSystemTrayIcon::isSystemTrayAvailable())
+    if (window.shouldShowAtStartup(parser.isSet("background"), QSystemTrayIcon::isSystemTrayAvailable()))
         window.show();
     if (parser.isSet("update-ready")) {
         const auto plan = QFileInfo(parser.value("update-ready"));

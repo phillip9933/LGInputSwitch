@@ -16,7 +16,8 @@ monitors, including Dell.
 Get the [latest release](https://github.com/phillip9933/LGInputSwitch/releases/latest).
 
 - **Windows x64:** download the portable `.exe` and run it; no installation is needed.
-  **An AMD GPU is required.** See [Windows setup](docs/windows-release.md).
+  LG alternate switching uses AMD graphics; standard DDC/CI is available for
+  compatible Windows connections. See [Windows setup](docs/windows-release.md).
 - **CachyOS / Arch Linux:** install the `.pkg.tar.zst` package and launch
   **LG Input Switch**. Uses `ddcutil`; native shortcut integration requires KDE
   Plasma. See [Linux setup](docs/linux-install.md).
@@ -27,7 +28,7 @@ Back up your settings and quit the app before upgrading.
 
 Monitor support varies, and advertised inputs can be incomplete. Linux testing
 has focused on CachyOS/KDE; physical Windows testing is limited. Intel/NVIDIA
-Windows backends and macOS remain future work. Use known input codes for your
+raw-I²C Windows backends and macOS remain future work. Use known input codes for your
 monitor; commands are sent directly to the display.
 
 ## Help and development
@@ -37,7 +38,7 @@ or save it with your [issue](https://github.com/phillip9933/LGInputSwitch/issues
 Reports stay local until you share them. Check for app updates in **Preferences → Application updates**.
 
 [Build the desktop app](docs/desktop-ui.md) · [Linux CLI](docs/linux-cli.md) ·
-[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.3.md)
+[Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.4.md)
 
 ## License and credits
 

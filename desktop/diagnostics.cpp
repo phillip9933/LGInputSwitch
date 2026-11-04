@@ -1,14 +1,17 @@
 #include "diagnostics.h"
 #include "../core/input_value.h"
 #include "process.h"
+#include "monitor_identity.h"
+#include "input_models.h"
+#include "windows_monitors.h"
 #ifndef LG_BUILD_REVISION
 #define LG_BUILD_REVISION "unavailable"
 #endif
 #ifdef Q_OS_WIN
+#include <windows.h>
 #include <lowlevelmonitorconfigurationapi.h>
 #include <physicalmonitorenumerationapi.h>
 #include <vector>
-#include <windows.h>
 #endif
 
 QJsonObject ParseDiagnosticVcp(const QByteArray &output, unsigned int feature)
@@ -93,7 +96,7 @@ QJsonObject CollectDesktopDiagnostics(const DiagnosticSnapshot &snapshot, bool p
             value = {{"read", false}};
         value["process_status"] = result.status;
         value["exit_code"] = result.exitCode;
-        if (result.output.contains("Permission denied"))
+        if (result.output.contains("Permission denied") || result.errorOutput.contains("Permission denied"))
             value["hint"] = "Check I2C device access permissions.";
         controls["0x" + code] = value;
     }
@@ -136,15 +139,24 @@ QString FormatDesktopDiagnostics(const DiagnosticSnapshot &snapshot, const QJson
                    "for LG 0xF4/source-0x50 switching. Command sent does not confirm a physical switch."},
         {"checks", checks}};
     QJsonObject target{{"selected_in_app", snapshot.selected}};
+    target["transport"] = snapshot.config.transport == WindowsDdcTransport ? "windows-ddc"
+#ifdef Q_OS_WIN
+        : snapshot.config.transport.isEmpty() ? "amd-adl" : "invalid";
+#else
+        : snapshot.config.transport.isEmpty() ? "ddcutil" : "invalid";
+#endif
     if (snapshot.selected)
     {
         target["adapter"] = snapshot.config.adapter;
         target[snapshot.config.bus ? "i2c_bus" : "display"] = snapshot.config.display;
+        if (snapshot.config.transport == WindowsDdcTransport &&
+            NativeWindowsDisplayNumber(snapshot.config.nativeDisplay) >= 0)
+            target["windows_display"] = snapshot.config.nativeDisplay;
     }
     report["target"] = target;
     if (!snapshot.monitors.isEmpty())
     {
-        report["report_format"] = 2;
+        report["report_format"] = 3;
         report["profile_count"] = snapshot.profileCount;
         report["profile_actions"] = snapshot.actions;
         QJsonArray monitors;
@@ -157,7 +169,12 @@ QString FormatDesktopDiagnostics(const DiagnosticSnapshot &snapshot, const QJson
                                         {"source_address", normalized["source_address"]},
                                         {"feature", monitor.config.method == "standard" ? "0x60" : "0xf4"},
                                         {"monitor_index", monitor.monitorIndex},
-                                        {"configured_inputs", normalized["configured_inputs"]}});
+                                        {"configured_inputs", normalized["configured_inputs"]},
+                                        {"hardware", SafeMonitorHardware(monitor.hardware)},
+                                        {"input_profile", monitor.inputProfile == Lg40U990AInputProfile
+                                            ? QString(Lg40U990AInputProfile) : QString("unmatched")},
+                                        {"automatic_inputs", monitor.autoInputs},
+                                        {"lg_alternate_transport_supported", monitor.config.transport != WindowsDdcTransport}});
         }
         report["profile_monitors"] = monitors;
     }
@@ -249,7 +266,10 @@ BOOL CALLBACK ProbeDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM context)
     info.cbSize = sizeof(info);
     QJsonObject display;
     if (GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO *>(&info)))
+    {
         display["windows_display"] = QString::fromWCharArray(info.szDevice);
+        display["hardware"] = NativeWindowsHardware(QString::fromWCharArray(info.szDevice));
+    }
     DWORD count = 0;
     if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, &count))
         display["enumeration_error"] = static_cast<qint64>(GetLastError());
@@ -296,6 +316,7 @@ QJsonObject ProbeWindowsMonitorControls()
         if (!(device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP))
             continue;
         QJsonObject adapter{{"model", QString::fromWCharArray(device.DeviceString)}};
+        adapter["windows_display"] = QString::fromWCharArray(device.DeviceName);
         const QString prefix = "\\Registry\\Machine\\";
         const auto key = QString::fromWCharArray(device.DeviceKey);
         if (key.startsWith(prefix, Qt::CaseInsensitive))

@@ -2,154 +2,15 @@
 #include "../core/input_value.h"
 #include "process.h"
 #include "profiles.h"
+#include "windows_monitors.h"
 #ifdef Q_OS_WIN
-#include "../app/app_config.h"
 #include "../platform/windows/adl_session.h"
 #include "../platform/windows/adl_transport.h"
 #else
 #include "../platform/linux/ddcutil_backend.h"
-#include "linux_autostart.h"
 #endif
 
-DesktopConfig LoadDesktopConfig(QString &warning)
-{
-    DesktopConfig c;
-    QSettings prefs;
-    c.appearance = prefs.value("appearance", "system").toString();
-    c.previousShortcut = prefs.value("previousShortcut").toString();
-    const auto storedRows = QJsonDocument::fromJson(prefs.value("inputs").toByteArray()).array();
-#ifdef Q_OS_WIN
-    AppConfig legacy;
-    if (!LoadConfig(legacy))
-        warning = "Choose your monitor and save to finish setup. Existing unreadable configuration is not "
-                  "saved automatically.";
-    if (!legacy.targets.empty())
-    {
-        c.adapter = legacy.targets[0].first;
-        c.display = legacy.targets[0].second;
-    }
-    c.inputs.clear();
-    for (const auto &input : lg::OrderInputs(legacy.inputs, legacy.cycleOrder))
-    {
-        auto hk = legacy.hotkeys.direct.find(input.label);
-        c.inputs.push_back(
-            {QString::fromStdString(input.label), QString::fromStdString(input.code),
-             hk == legacy.hotkeys.direct.end() ? QString{} : QString::fromStdString(hk->second), true});
-    }
-    // Keep disabled/custom mappings available to re-enable. The legacy enabled
-    // values take precedence if config.json was edited outside this frontend.
-    auto appendDisabled = [&](DesktopInput row) {
-        for (const auto &existing : c.inputs)
-            if (existing.label == row.label)
-                return;
-        row.enabled = false;
-        c.inputs.push_back(row);
-    };
-    for (const auto &item : storedRows)
-    {
-        auto row = item.toObject();
-        appendDisabled({row["label"].toString(), row["code"].toString(), row["shortcut"].toString(), false});
-    }
-    const DesktopConfig defaults;
-    for (const auto &row : defaults.inputs)
-        appendDisabled(row);
-    c.source = QString::fromStdString(legacy.i2cSourceAddr);
-    c.cycleShortcut = QString::fromStdString(legacy.hotkeys.cycle);
-    c.debounce = legacy.debounceMs;
-    c.notifications = legacy.showNotifications;
-    c.startup = legacy.startWithWindows;
-#else
-    c.startup = DesktopAutostartEnabled();
-    c.globalShortcuts = prefs.value("globalShortcuts", false).toBool();
-    c.cycleShortcut = prefs.value("cycleShortcut", c.cycleShortcut).toString();
-    c.display = prefs.value("target", -1).toInt();
-    c.bus = prefs.value("bus", true).toBool();
-    c.source = prefs.value("source", c.source).toString();
-    c.debounce = prefs.value("debounce", c.debounce).toInt();
-    c.notifications = prefs.value("notifications", true).toBool();
-    const auto stored = prefs.value("inputs").toByteArray();
-    if (!stored.isEmpty())
-    {
-        QJsonParseError error;
-        const auto doc = QJsonDocument::fromJson(stored, &error);
-        if (error.error == QJsonParseError::NoError && doc.isArray() && !doc.array().isEmpty())
-        {
-            c.inputs.clear();
-            for (auto item : doc.array())
-            {
-                auto row = item.toObject();
-                c.inputs.push_back({row["label"].toString(), row["code"].toString(),
-                                    row["shortcut"].toString(), row["enabled"].toBool()});
-            }
-        }
-        else
-            warning = "Saved inputs could not be read. Review settings before saving.";
-    }
-#endif
-    return c;
-}
-
-bool SaveDesktopConfig(const DesktopConfig &c, QString &error)
-{
-#ifdef Q_OS_WIN
-    AppConfig legacy;
-    LoadConfig(legacy);
-    if (legacy.targets.empty())
-        legacy.targets.push_back({c.adapter, c.display});
-    else
-        legacy.targets[0] = {c.adapter, c.display};
-    legacy.inputs.clear();
-    legacy.cycleOrder.clear();
-    legacy.hotkeys.direct.clear();
-    for (const auto &row : c.inputs)
-    {
-        const auto label = row.label.toStdString();
-        if (row.enabled)
-        {
-            legacy.inputs.push_back({label, row.code.toStdString()});
-            legacy.cycleOrder.push_back(label);
-        }
-        if (!row.shortcut.isEmpty())
-            legacy.hotkeys.direct[label] = row.shortcut.toStdString();
-    }
-    legacy.i2cSourceAddr = c.source.toStdString();
-    legacy.hotkeys.cycle = c.cycleShortcut.toStdString();
-    legacy.debounceMs = c.debounce;
-    legacy.showNotifications = c.notifications;
-    legacy.startWithWindows = c.startup;
-    if (!SaveConfig(legacy))
-    {
-        error = "Could not save config.json. Check that the app folder is writable.";
-        return false;
-    }
-#endif
-    QJsonArray inputs;
-    for (const auto &row : c.inputs)
-        inputs.append(QJsonObject{
-            {"label", row.label}, {"code", row.code}, {"shortcut", row.shortcut}, {"enabled", row.enabled}});
-    QSettings prefs;
-    prefs.setValue("inputs", QJsonDocument(inputs).toJson(QJsonDocument::Compact));
-#ifndef Q_OS_WIN
-    prefs.setValue("globalShortcuts", c.globalShortcuts);
-    prefs.setValue("cycleShortcut", c.cycleShortcut);
-    prefs.setValue("target", c.display);
-    prefs.setValue("bus", c.bus);
-    prefs.setValue("source", c.source);
-    prefs.setValue("debounce", c.debounce);
-    prefs.setValue("notifications", c.notifications);
-#endif
-    prefs.setValue("previousShortcut", c.previousShortcut);
-    prefs.setValue("appearance", c.appearance);
-    prefs.sync();
-    if (prefs.status() != QSettings::NoError)
-    {
-        error = "Could not save desktop preferences.";
-        return false;
-    }
-    return true;
-}
-
-Discovery DiscoverDesktopMonitors()
+static Discovery DiscoverPlatformMonitors()
 {
     Discovery result;
 #ifdef Q_OS_WIN
@@ -187,6 +48,7 @@ Discovery DiscoverDesktopMonitors()
                     continue;
                 const int display = info[j].displayID.iDisplayLogicalIndex;
                 QString identity, inputProfile;
+                QJsonObject hardware;
                 if (Adl().edid)
                 {
                     ADLDisplayEDIDData data{};
@@ -197,12 +59,15 @@ Discovery DiscoverDesktopMonitors()
                         const QByteArray edid(data.cEDIDData, data.iEDIDSize);
                         identity = MonitorIdentity(edid);
                         inputProfile = MonitorInputProfileFromEdid(edid);
+                        hardware = MonitorEdidHardware(edid);
                     }
                 }
-                result.monitors.push_back(
+                DesktopMonitor target =
                     {QString::fromLocal8Bit(info[j].strDisplayName) +
                          QString(" · Adapter %1 / Display %2").arg(adapter.iAdapterIndex).arg(display),
-                     adapter.iAdapterIndex, display, false, identity, inputProfile});
+                     adapter.iAdapterIndex, display, false, identity, inputProfile};
+                target.hardware = hardware;
+                result.monitors.push_back(target);
             }
         if (info)
             ReleaseAdlMemory(reinterpret_cast<void **>(&info));
@@ -240,6 +105,7 @@ Discovery DiscoverDesktopMonitors()
                     if (!identity.isEmpty())
                     {
                         monitor.identity = identity;
+                        monitor.hardware = MonitorEdidHardware(bytes);
                         const auto profile = MonitorInputProfileFromEdid(bytes);
                         if (!profile.isEmpty())
                             monitor.inputProfile = profile;
@@ -249,7 +115,7 @@ Discovery DiscoverDesktopMonitors()
     if (probe.status != "finished" || probe.exitCode != 0)
     {
         result.monitors.clear();
-        result.message = output.trimmed().left(1200);
+        result.message = (output + "\n" + QString::fromLocal8Bit(probe.errorOutput)).trimmed().left(1200);
     }
 #endif
     if (result.message.isEmpty())
@@ -258,6 +124,22 @@ Discovery DiscoverDesktopMonitors()
                 ? "No controllable monitors found. Check the cable, graphics driver and DDC/I2C access."
                 : QString("%1 monitor(s) available. Use Connect on a saved monitor if needed.")
                       .arg(result.monitors.size());
+    return result;
+}
+
+Discovery DiscoverDesktopMonitors()
+{
+    auto result = DiscoverPlatformMonitors();
+#ifdef Q_OS_WIN
+    // The native path does not depend on AMD initialization and is isolated in
+    // case a dock/display driver hangs while exposing its monitor information.
+    const auto probe = RunDesktopProcess(QCoreApplication::applicationFilePath(),
+                                         {"--windows-discovery"}, 15000, 262144);
+    if (probe.status == "finished" && probe.exitCode == 0)
+        result = MergeWindowsDiscovery(result, ParseNativeWindowsDiscovery(probe.output));
+    else
+        result.message += " Windows dock discovery " + probe.status + ".";
+#endif
     return result;
 }
 
@@ -271,9 +153,30 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
         return {lg::SwitchStatus::InvalidArgument, 2, "Invalid monitor or input code."};
     const lg::InputCommand command{source, c.method == "standard" ? 0x60u : 0xf4u, value};
 #ifdef Q_OS_WIN
+    if (c.transport == WindowsDdcTransport)
+    {
+        // Validate the method before starting a child: never silently change an
+        // LG 0xF4/source-0x50 command into a standard 0x60 command.
+        if (c.method != "standard")
+            return DispatchNativeWindowsInput(c, code, {}, {});
+        const auto probe = RunDesktopProcess(QCoreApplication::applicationFilePath(),
+            {"--windows-switch", c.nativeDisplay, c.targetIdentity, code}, 10000);
+        if (probe.status != "finished" || probe.exitCode != 0)
+            return {lg::SwitchStatus::TransportFailure, probe.exitCode,
+                    ("Windows input command " + probe.status + "; physical switch unverified.").toStdString()};
+        const auto result = QJsonDocument::fromJson(probe.output).object();
+        if (!result.contains("sent") || !result.contains("native_code"))
+            return {lg::SwitchStatus::TransportFailure, -1, "Invalid Windows command result; physical switch unverified."};
+        return {result["sent"].toBool() ? lg::SwitchStatus::CommandSent : lg::SwitchStatus::TransportFailure,
+                result["native_code"].toInt(-1), result["detail"].toString().toStdString()};
+    }
+    if (!c.transport.isEmpty())
+        return {lg::SwitchStatus::InvalidArgument, 87, "Unknown monitor transport."};
     AdlTransport transport(c.adapter, c.display);
     return transport.Send(command);
 #else
+    if (!c.transport.isEmpty())
+        return {lg::SwitchStatus::InvalidArgument, 87, "This monitor connection is only supported on Windows."};
     DdcutilTransport transport(c.bus ? "--bus" : "--display", static_cast<unsigned int>(c.display));
     const auto arguments = transport.Arguments(command);
     if (arguments.empty())
@@ -289,23 +192,4 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
         (QString("ddcutil %1 (code %2). Check cable and I2C access.").arg(result.status).arg(result.exitCode))
             .toStdString()};
 #endif
-}
-
-bool SaveDesktopShortcutPreferences(const DesktopConfig &c, QString &error)
-{
-    QSettings prefs;
-    QJsonArray rows;
-    for (const auto &row : c.inputs)
-        rows.append(QJsonObject{
-            {"label", row.label}, {"code", row.code}, {"shortcut", row.shortcut}, {"enabled", row.enabled}});
-    prefs.setValue("inputs", QJsonDocument(rows).toJson(QJsonDocument::Compact));
-    prefs.setValue("cycleShortcut", c.cycleShortcut);
-    prefs.setValue("previousShortcut", c.previousShortcut);
-    prefs.sync();
-    if (prefs.status() != QSettings::NoError)
-    {
-        error = "Could not persist the shortcut change from Plasma.";
-        return false;
-    }
-    return true;
 }

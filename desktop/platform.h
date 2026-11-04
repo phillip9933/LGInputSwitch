@@ -17,6 +17,7 @@ struct DesktopConfig
     QString source = "0x50", cycleShortcut = "CTRL+ALT+1", appearance = "system", previousShortcut;
     int adapter = -1, display = -1, debounce = 750;
     bool bus = false, notifications = true, startup = false, globalShortcuts = false;
+    QString transport, nativeDisplay, targetIdentity;
 };
 struct DesktopMonitor
 {
@@ -25,15 +26,13 @@ struct DesktopMonitor
     bool bus = false;
     QString identity;
     QString inputProfile; // live hardware identification; not restored from saved names/routes
+    QString transport, nativeDisplay;
+    QJsonObject hardware; // live, redacted EDID manufacturer/product data; no serials
 };
 struct Discovery
 {
     QVector<DesktopMonitor> monitors;
     QString message;
 };
-DesktopConfig LoadDesktopConfig(QString &warning);
-bool SaveDesktopConfig(const DesktopConfig &config, QString &error);
 Discovery DiscoverDesktopMonitors();
 lg::SwitchResult SendDesktopInput(const DesktopConfig &config, const QString &code);
-
-bool SaveDesktopShortcutPreferences(const DesktopConfig &config, QString &error);

@@ -1,6 +1,7 @@
 #define LG_DESKTOP_TEST
 #include "../desktop/main.cpp"
 #include <iostream>
+void TestUpdatePanel();
 
 static void check(bool value, const char *message)
 {
@@ -26,6 +27,34 @@ static bool waitUntil(const std::function<bool()> &predicate)
 
 struct DesktopWindowProbe
 {
+    static void blockedStartup(DesktopWindow &window)
+    {
+        check(window.configurationBlocked_ && !window.save_->isEnabled(),
+              "Unreadable configuration did not block switching/saving");
+        if (window.shouldShowAtStartup(true, true)) window.show();
+        check(window.isVisible() && !window.tray_->isVisible() &&
+                  waitUntil([&] { return window.status_->text().contains("Saved profiles could not be read"); }),
+              "Background startup hid the configuration recovery message");
+    }
+    static void recoveryDraft()
+    {
+        DesktopWindow window(true);
+        window.editProfile_->setChecked(true);
+        auto &monitor = window.draft_.monitors[0];
+        monitor.autoInputs = true;
+        const auto id = monitor.id;
+        const auto inputs = monitor.inputs;
+        ApplyMonitorInputs(window.draft_, id, {inputs.mid(1), "Subset", true});
+        window.populateProfile(); window.captureDraft();
+        check(window.active().actions[0].autoDisabled && !window.active().actions[0].missingInputs.isEmpty(),
+              "Collecting a draft lost automatic recovery state");
+        window.table_->item(0, 0)->setCheckState(Qt::Checked);
+        window.table_->item(0, 0)->setCheckState(Qt::Unchecked);
+        window.captureDraft();
+        ApplyMonitorInputs(window.draft_, id, {inputs, "Full", true});
+        check(!window.active().actions[0].enabled && !window.active().actions[0].autoDisabled,
+              "Automatic recovery undid an explicit user disable");
+    }
     static void compactLayout(DesktopWindow &window)
     {
         const auto originalSize = window.size();
@@ -279,6 +308,7 @@ int main(int argc, char **argv)
     app.setQuitOnLastWindowClosed(false);
     QTemporaryDir temporary;
     check(temporary.isValid(), "Temporary directory unavailable");
+    TestUpdatePanel();
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, temporary.path());
 #ifndef Q_OS_WIN
     qputenv("XDG_CONFIG_HOME", temporary.path().toUtf8());
@@ -307,6 +337,7 @@ int main(int argc, char **argv)
     check(!SetDesktopAutostart(true, startupError, blocker.fileName() + "/entry", executable),
           "Unwritable startup path was accepted");
 #endif
+    DesktopWindowProbe::recoveryDraft();
     {
         DesktopWindow preview(true);
         preview.show();
@@ -437,6 +468,13 @@ int main(int argc, char **argv)
     legacy.setValue("cycleShortcut", "");
     legacy.setValue("debounce", 0);
     legacy.sync();
+    for (const QByteArray blocked : {QByteArray("{broken"), QByteArray("{\"version\":999}")})
+    {
+        legacy.setValue("profilesV2", blocked); legacy.sync();
+        DesktopWindow recovery(false);
+        DesktopWindowProbe::blockedStartup(recovery);
+    }
+    legacy.remove("profilesV2"); legacy.sync();
     {
         DesktopWindow live(false);
         live.show();

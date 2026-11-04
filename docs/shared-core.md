@@ -1,64 +1,55 @@
 # Shared switching core
 
-This first extraction keeps the existing Windows tray and the experimental Linux
-CLI working while putting their switching behavior behind a shared C++17 boundary.
-It does not introduce a new config schema or UI framework. Substantial Codex AI
-assistance was used for implementation, review and regression tests.
+The portable C++17 core is used by the Windows/Linux desktop app and standalone
+Linux CLI. The original Win32 tray/dialog frontend and its Visual Studio project
+are retired. Substantial Codex AI assistance was used for implementation and tests.
 
 ## Data flow
 
-```
-Windows tray/settings -> app_toggle adapter -> portable input/cycle core
-                                             -> AdlTransport -> existing AMD bridge
+The Qt desktop dispatches saved profile/action IDs, resolves each monitor's current
+connection, then sends its command through the selected platform transport. Grouped
+actions retain per-monitor results and retry only failed members.
 
-Linux CLI parser -> typed InputCommand -> DdcutilTransport -> installed ddcutil
-```
+- Windows AMD connections use `AdlTransport` and the installed AMD driver.
+- Native Windows connections use the bounded Windows DDC/CI child-process path.
+- Linux uses the installed ddcutil through `DdcutilTransport` and bounded processes.
+- The CLI uses the portable command/cycle helpers and the Linux transport directly.
 
-`core/input_switcher.h` owns input definitions, commands, results and the transport
-interface. The core has no Windows, ADL or POSIX includes. `InputTransport::Send`
-operates on one target selected by the frontend and bound into the transport.
-Adapter/display indices and Linux display/bus selectors are never interchanged.
-
-Commands retain full unsigned values until range validation (source/feature byte,
-16-bit value); no narrowing conversion can silently change the requested write.
-Each backend validates commands and its native target again. Both initial
-backends accept the existing F4 LG input profile only. Future Intel/NVIDIA
-transports can implement this interface without duplicating tray or cycle logic.
+`core/input_switcher.*` owns input definitions, commands, results and the
+`InputTransport` interface, with no OS or UI headers. A transport is bound to one
+selected target; adapter/display indices and Linux display/bus selectors are not
+interchanged. Commands keep full unsigned values until validation. LG alternate
+`0xF4` commands retain their custom source; standard `0x60` writes use source `0x51`.
+Native Windows connections cannot express LG's custom source address.
 
 Results distinguish invalid arguments, backend failure and command sent without
-readback verification. Native status and backend details are preserved. More
-specific driver/permission classifications and discovery belong in later backend
-work; a sent result never proves the physical input changed.
+physical readback verification. `OrderInputs` retains configured enabled labels,
+then appends remaining enabled inputs alphabetically. `CycleInputs` commits the
+next position only after an accepted send.
 
-`OrderInputs` preserves the established Windows order: configured enabled labels
-first, then remaining enabled labels alphabetically, with duplicates removed.
-`InputPosition` maps direct selection to that order. `CycleInputs` commits the next
-position only on an accepted send; a retry targets the same failed input.
+## Configuration and OS services
+
+`desktop/profiles.*` owns versioned workspace persistence, validation, monitor
+identity resolution and profile history. Saves remain atomic and preserve
+unreadable/newer files. `desktop/legacy_config.*` is a read-only importer for old
+Windows config.json and pre-profile Qt settings; the desktop no longer depends
+on the retired frontend or its JSON library/writers.
+
+`desktop/windows_hotkeys.*` parses native Windows shortcuts independently of the
+Windows SDK. Platform startup helpers remain separate from monitor transports.
+The Qt window, tray and native shortcuts share the same saved action dispatch.
 
 ## Build and verification
 
-CMake builds `lginput_core`, the platform frontend and regression executables.
-On Windows, it also builds the full Win32 tray app using the same resources,
-Unicode settings, C++17 and static MSVC runtime as the existing solution. CI still
-builds the original solution too, so either build description drifting causes
-visible build failures. Linux installs only the CLI, not a desktop service.
+CMake builds the portable core and hardware-free regressions. Enable
+`LG_BUILD_DESKTOP=ON` for the Qt app; Linux also builds the standalone CLI. Windows
+uses CMake with the Visual Studio toolchain, without a separate solution file.
+The Linux qmake application, smoke-test and KDE probe entry points are also built
+in CI. See [desktop builds](desktop-ui.md#build).
 
-Local GCC/undefined-sanitizer checks passed for:
-
-- portable core command/result and ordering/state regression checks;
-- existing Windows adapter/hotkey regression checks with a fake ADL entry point;
-- all 10 real-CLI/fake-ddcutil integration tests, including unchanged argv/status.
-
-Core tests verify that invalid strings never reach the transport, known F4/source
-values survive conversion, native failure details are preserved, custom input
-codes survive ordering, and failure/direct selection interact correctly with the
-cycle. Backends continue to require hardware acceptance as described in the
-maintenance and Linux verification documents.
-
-## Deliberate remaining work
-
-Windows monitor discovery still lives in Settings; Linux discovery currently
-forwards ddcutil output. Stable identities, structured discovery, a portable config
-schema with migration/rollback, asynchronous UI writes and desktop services remain
-separate work. This extraction does not close #10 by itself or change any hardware
-compatibility claim. Live scope remains in #10–#14.
+Regressions cover strict command parsing and wire packets, cycle/history state,
+AMD transport guards and fake driver failures, native Windows routing, shortcut
+parsing, read-only settings migration, workspace preservation, grouped switching,
+diagnostic privacy and update verification. Tests use synthetic displays, fake
+drivers/processes and simulated network replies. Hardware support still requires
+feedback from owners of the affected monitor, GPU and connection.

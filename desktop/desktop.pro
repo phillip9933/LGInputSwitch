@@ -9,9 +9,9 @@ unix:!macx:exists(/usr/include/KF6/KGlobalAccel/KGlobalAccel) {
     LIBS += -lKF6GlobalAccel
 }
 
-SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp
+SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp legacy_config.cpp
 
-SOURCES += monitor_inputs.cpp
+SOURCES += monitor_inputs.cpp monitor_identity.cpp windows_monitors.cpp
 
 QT += network
 SOURCES += update_policy.cpp update_install.cpp updates.cpp

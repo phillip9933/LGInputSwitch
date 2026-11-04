@@ -1,13 +1,15 @@
 #include "profiles.h"
+#include "legacy_config.h"
 #include "../core/input_value.h"
 #include "monitor_inputs.h"
 #include "input_models.h"
+#include "windows_monitors.h"
 #include <QKeySequence>
 #ifndef Q_OS_WIN
 #include "linux_autostart.h"
 #endif
 #ifdef Q_OS_WIN
-#include "../app/hotkeys.h"
+#include "windows_hotkeys.h"
 #endif
 
 namespace
@@ -21,8 +23,14 @@ QJsonArray InputJson(const QVector<DesktopInput> &inputs)
 }
 QJsonObject RouteJson(const DesktopMonitor &route)
 {
-    return {
+    QJsonObject json = {
         {"adapter", route.adapter}, {"display", route.display}, {"bus", route.bus}, {"label", route.label}};
+    if (!route.transport.isEmpty())
+    {
+        json["transport"] = route.transport;
+        json["windowsDisplay"] = route.nativeDisplay;
+    }
+    return json;
 }
 QString Hash(const QByteArray &bytes)
 {
@@ -172,6 +180,7 @@ DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy)
 QJsonObject WorkspaceJson(const DesktopWorkspace &w)
 {
     QJsonArray monitors, profiles;
+    bool recovery = false;
     for (const auto &m : w.monitors)
         monitors.append(QJsonObject{{"id", m.id},
                                     {"name", m.name},
@@ -191,11 +200,21 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
             QJsonObject mapping;
             for (auto it = a.inputs.begin(); it != a.inputs.end(); ++it)
                 mapping[it.key()] = it.value();
-            actions.append(QJsonObject{{"id", a.id},
+            QJsonObject row{{"id", a.id},
                                        {"name", a.name},
                                        {"shortcut", a.shortcut},
                                        {"enabled", a.enabled},
-                                       {"inputs", mapping}});
+                                       {"inputs", mapping}};
+            if (a.autoDisabled || !a.missingInputs.isEmpty())
+            {
+                QJsonObject missing;
+                for (auto it = a.missingInputs.begin(); it != a.missingInputs.end(); ++it)
+                    missing[it.key()] = it.value();
+                row["autoDisabled"] = a.autoDisabled;
+                row["missingInputs"] = missing;
+                recovery = true;
+            }
+            actions.append(row);
         }
         profiles.append(QJsonObject{{"id", p.id},
                                     {"name", p.name},
@@ -205,7 +224,10 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                     {"previousShortcut", p.previousShortcut}});
     }
     const auto &c = w.preferences;
-    return {{"version", 3},
+    bool native = false;
+    for (const auto &monitor : w.monitors)
+        native = native || monitor.route.transport == WindowsDdcTransport;
+    return {{"version", native || recovery ? 4 : 3},
             {"activeProfile", w.activeProfile},
             {"monitors", monitors},
             {"profiles", profiles},
@@ -214,6 +236,17 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
                                         {"startup", c.startup},
                                         {"globalShortcuts", c.globalShortcuts},
                                         {"debounce", c.debounce}}}};
+}
+bool SafeDesktopShortcut(const QString &text)
+{
+    if (text.isEmpty())
+        return true;
+    const auto sequence = QKeySequence::fromString(text, QKeySequence::PortableText);
+    if (sequence.count() != 1 || sequence[0].key() == Qt::Key_unknown)
+        return false;
+    const auto key = sequence[0];
+    return (key.key() >= Qt::Key_F1 && key.key() <= Qt::Key_F24) ||
+           (key.keyboardModifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier));
 }
 bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
 {
@@ -243,6 +276,12 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             return fail("Saved monitors need unique names and IDs.");
         monitorIds.insert(m.id);
         names.insert(m.name);
+        if (!m.route.transport.isEmpty() && m.route.transport != WindowsDdcTransport)
+            return fail(m.name + ": unsupported monitor connection.");
+        if (m.route.transport == WindowsDdcTransport &&
+            (NativeWindowsDisplayNumber(m.route.nativeDisplay) < 0 || m.route.bus ||
+             m.route.adapter != -1 || m.route.display != NativeWindowsDisplayNumber(m.route.nativeDisplay)))
+            return fail(m.name + ": invalid Windows monitor connection.");
         if (!m.identity.isEmpty() && !QRegularExpression("^[0-9a-f]{64}$").match(m.identity).hasMatch())
             return fail("Invalid monitor fingerprint.");
         // A physical display has one saved definition, shared by all profiles.
@@ -279,8 +318,14 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             return false;
 #ifdef Q_OS_WIN
         HotkeySpec spec{};
-        if (!ParseHotkey(text.toStdString(), spec))
+        // Older configurations can contain plain typing keys. Load them for
+        // repair, but never register them or save them as active shortcuts.
+        if (SafeDesktopShortcut(text) && !ParseHotkey(text.toStdString(), spec))
+        {
+            error = "Unsupported Windows shortcut: " + text +
+                    ". Choose a letter, number, function key or navigation key with Ctrl, Alt or Meta.";
             return false;
+        }
 #endif
         shortcuts.insert(canonical);
         return true;
@@ -302,7 +347,7 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             members.insert(id);
         }
         if (!shortcut(p.cycleShortcut) || !shortcut(p.previousShortcut))
-            return fail("Shortcuts must be valid and unique across every profile.");
+            return fail(error.isEmpty() ? "Shortcuts must be valid and unique across every profile." : error);
         QSet<QString> ids, labels;
         for (const auto &a : p.actions)
         {
@@ -312,9 +357,18 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
             ids.insert(a.id);
             labels.insert(a.name);
             if (a.enabled && !shortcut(a.shortcut))
-                return fail("Shortcuts must be valid and unique across every profile.");
+                return fail(error.isEmpty() ? "Shortcuts must be valid and unique across every profile." : error);
             if (a.inputs.size() != members.size())
                 return fail(p.name + ": select an input for every assigned monitor in every action.");
+            if (a.autoDisabled && a.enabled)
+                return fail(p.name + ": an action awaiting input recovery must be disabled.");
+            for (auto it = a.missingInputs.begin(); it != a.missingInputs.end(); ++it)
+            {
+                unsigned int code;
+                if (!members.contains(it.key()) || !a.inputs.value(it.key()).isEmpty() || a.enabled ||
+                    !ParseInputValue(it.value().toStdString(), 0xffff, code))
+                    return fail(p.name + ": invalid missing-input recovery information.");
+            }
             for (auto it = a.inputs.begin(); it != a.inputs.end(); ++it)
             {
                 const auto *m = FindMonitor(w, it.key());
@@ -329,7 +383,7 @@ bool ValidateWorkspace(const DesktopWorkspace &w, QString &error)
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &error)
 {
     error.clear();
-    if (json["version"].toInt(-1) != 2 && json["version"].toInt(-1) != 3)
+    if (!QList<int>{2, 3, 4}.contains(json["version"].toInt(-1)))
     {
         error = "Unsupported profile configuration version.";
         return false;
@@ -351,6 +405,13 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
         m.identity = j["identity"].toString();
         m.route = {r["label"].toString(), r["adapter"].toInt(-1), r["display"].toInt(-1), r["bus"].toBool(),
                    m.identity};
+        m.route.transport = r["transport"].toString();
+        m.route.nativeDisplay = r["windowsDisplay"].toString();
+        if (!m.route.transport.isEmpty() && json["version"].toInt() < 4)
+        {
+            error = "Native Windows monitor connections require profile configuration version 4.";
+            return false;
+        }
         m.source = j["source"].toString();
         m.method = j["method"].toString("lg");
         for (auto input : j["inputs"].toArray())
@@ -382,6 +443,20 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
             const auto mapping = a["inputs"].toObject();
             for (auto it = mapping.begin(); it != mapping.end(); ++it)
                 row.inputs[it.key()] = it.value().toString();
+            if (a.contains("autoDisabled") || a.contains("missingInputs"))
+            {
+                if (json["version"].toInt() < 4 ||
+                    (a.contains("autoDisabled") && !a["autoDisabled"].isBool()) ||
+                    (a.contains("missingInputs") && !a["missingInputs"].isObject()))
+                {
+                    error = "Invalid input recovery information; configuration version 4 is required.";
+                    return false;
+                }
+                row.autoDisabled = a["autoDisabled"].toBool();
+                const auto missing = a["missingInputs"].toObject();
+                for (auto it = missing.begin(); it != missing.end(); ++it)
+                    row.missingInputs[it.key()] = it.value().toString();
+            }
             p.actions.push_back(row);
         }
         w.profiles.push_back(p);
@@ -399,9 +474,10 @@ QString WorkspacePath()
     return {};
 #endif
 }
-DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath)
+DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePath, WorkspaceLoadStatus *status)
 {
     warning.clear();
+    if (status) *status = WorkspaceLoadStatus::Migrated;
     bool exists = false;
     QString error;
     const auto bytes = ReadWorkspaceBytes(exists, error, storagePath);
@@ -413,6 +489,7 @@ DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePa
         if (error.isEmpty() && parse.error == QJsonParseError::NoError && doc.isObject() &&
             ParseWorkspace(doc.object(), w, error))
         {
+            if (status) *status = WorkspaceLoadStatus::Loaded;
 #ifndef Q_OS_WIN
             if (storagePath.isEmpty())
                 w.preferences.startup = DesktopAutostartEnabled();
@@ -422,15 +499,29 @@ DesktopWorkspace LoadDesktopWorkspace(QString &warning, const QString &storagePa
         warning = "Saved profiles could not be read. Switching and saving are blocked to preserve the file. "
                   "Back up and repair/remove the profile configuration, then restart. " +
                   error;
+        if (status) *status = WorkspaceLoadStatus::Blocked;
         return MigrateDesktopConfig(DesktopConfig{});
     }
-    return MigrateDesktopConfig(LoadDesktopConfig(warning));
+    return MigrateDesktopConfig(LoadLegacyDesktopConfig(warning));
 }
 bool SaveDesktopWorkspace(const DesktopWorkspace &w, QString &error, const QString &storagePath)
 {
     error.clear();
     if (!ValidateWorkspace(w, error))
         return false;
+    for (const auto &profile : w.profiles)
+    {
+        auto safe = [&](const QString &name, const QString &shortcut) {
+            if (SafeDesktopShortcut(shortcut)) return true;
+            error = profile.name + " → " + name +
+                    ": use Ctrl, Alt or Meta with this global shortcut, or choose a function key (F1–F24).";
+            return false;
+        };
+        if (!safe("Cycle inputs", profile.cycleShortcut) || !safe("Previous input", profile.previousShortcut))
+            return false;
+        for (const auto &action : profile.actions)
+            if (action.enabled && !safe(action.name, action.shortcut)) return false;
+    }
     // Never overwrite a corrupted/newer file with an in-memory fallback.
     bool exists = false;
     const auto original = ReadWorkspaceBytes(exists, error, storagePath);
@@ -472,37 +563,9 @@ bool SaveDesktopWorkspace(const DesktopWorkspace &w, QString &error, const QStri
 }
 QString MonitorRouteKey(const DesktopMonitor &m)
 {
+    if (m.transport == WindowsDdcTransport)
+        return QString(WindowsDdcTransport) + ':' + m.nativeDisplay;
     return QString("%1:%2:%3").arg(m.adapter).arg(m.display).arg(m.bus);
-}
-QString MonitorIdentity(const QByteArray &edid)
-{
-    if (edid.size() < 128 || edid.left(8) != QByteArray::fromHex("00ffffffffffff00"))
-        return {};
-    unsigned int sum = 0;
-    for (int i = 0; i < 128; ++i)
-        sum += static_cast<unsigned char>(edid[i]);
-    if ((sum & 0xff) != 0)
-        return {};
-    // Base block contains model/serial. Ignore mutable extension blocks.
-    return Hash(edid.left(128));
-}
-QString MonitorInputProfileFromEdid(const QByteArray &edid)
-{
-    if (MonitorIdentity(edid).isEmpty())
-        return {};
-    const unsigned int manufacturer = (static_cast<unsigned char>(edid[8]) << 8) |
-                                      static_cast<unsigned char>(edid[9]);
-    if (manufacturer != 0x1e6d && manufacturer != 0x30e4) // GSM / LGD
-        return {};
-    for (int offset = 54; offset <= 108; offset += 18)
-        if (edid.mid(offset, 5) == QByteArray::fromHex("000000fc00"))
-        {
-            const auto profile = KnownMonitorInputProfile(
-                QString::fromLatin1(edid.mid(offset + 5, 13)));
-            if (!profile.isEmpty())
-                return profile;
-        }
-    return {};
 }
 Discovery ParseDesktopDiscovery(const QByteArray &output)
 {
@@ -559,7 +622,7 @@ MonitorResolution ResolveSavedMonitor(const SavedMonitor &m, const Discovery &d,
     {
         QVector<DesktopMonitor> matches;
         for (const auto &candidate : d.monitors)
-            if (candidate.identity == m.identity)
+            if (candidate.identity == m.identity && candidate.transport == m.route.transport)
                 matches.push_back(candidate);
         if (matches.size() == 1)
             return {true, matches.front(), {}};
@@ -642,13 +705,17 @@ ProfileSwitchResult SendProfileAction(const DesktopWorkspace &w, const QString &
         entry.code = input->code;
         if (!resolution.available)
         {
-            entry.status = resolution.reason;
+            entry.status = current.monitors.isEmpty() && !current.message.isEmpty()
+                               ? current.message : resolution.reason;
             result.monitors.push_back(entry);
             continue;
         }
         entry.target.adapter = resolution.target.adapter;
         entry.target.display = resolution.target.display;
         entry.target.bus = resolution.target.bus;
+        entry.target.transport = resolution.target.transport;
+        entry.target.nativeDisplay = resolution.target.nativeDisplay;
+        entry.target.targetIdentity = resolution.target.identity;
         entry.attempted = true;
         entry.result = sender(entry.target, input->code);
         entry.status = entry.result.sent()
@@ -747,6 +814,17 @@ QJsonObject ProfileCommandDiagnostics(const DesktopWorkspace &w, const ProfileSw
                                                        : "failed or unavailable"},
                         {"native_code", entry.result.nativeCode},
                         {"attempted", entry.attempted}});
+        auto record = entries.last().toObject();
+        record["transport"] = entry.target.transport == WindowsDdcTransport ? "windows-ddc"
+#ifdef Q_OS_WIN
+            : "amd-adl";
+#else
+            : "ddcutil";
+#endif
+        if (entry.target.transport == WindowsDdcTransport &&
+            NativeWindowsDisplayNumber(entry.target.nativeDisplay) >= 0)
+            record["windows_display"] = entry.target.nativeDisplay;
+        entries[entries.size() - 1] = record;
     }
     return {{"complete", r.complete()}, {"monitors", entries}};
 }

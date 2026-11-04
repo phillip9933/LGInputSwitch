@@ -1,4 +1,10 @@
-# Cross-platform architecture proposal
+# Original cross-platform architecture proposal
+
+This document records the original delivery plan. The shared Qt desktop frontend,
+profiles and diagnostics are now implemented, and the original Win32 frontend and
+Visual Studio project have been retired. See [current desktop build instructions](desktop-ui.md)
+and [shared core](shared-core.md) for the maintained architecture; references below
+to retaining the original frontend describe the earlier transition.
 
 This is a technical design, not a duplicate work board. Issues and release
 trackers remain the source of truth for live status and scope.
