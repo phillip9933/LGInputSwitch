@@ -4,7 +4,9 @@ Switch monitor inputs from your system tray or keyboard on Windows and Linux.
 Use LG’s alternate switching method or standard DDC/CI commands for compatible
 monitors, including Dell.
 
-<a href="https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.4"><img src="docs/badges/github-releases.svg" alt="Download LG Input Switch 1.3.4 for Windows or Linux from GitHub Releases" height="40"></a>
+<a href="https://github.com/phillip9933/LGInputSwitch/releases/download/1.3.4/LGInputSwitch-1.3.4-Windows-x64.exe"><img src="docs/badges/windows-x64.svg" alt="Download LG Input Switch 1.3.4 for Windows x64" height="40"></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://github.com/phillip9933/LGInputSwitch/releases/download/1.3.4/lginputswitch-1.3.4-1-x86_64.pkg.tar.zst"><img src="docs/badges/arch-linux-x64.svg" alt="Download LG Input Switch 1.3.4 for Linux x86_64 (CachyOS / Arch package)" height="40"></a>
 
 **Support:** [Buy me a coffee](https://buymeacoffee.com/phillip9933) · [GitHub Sponsors](https://github.com/sponsors/phillip9933)
 
