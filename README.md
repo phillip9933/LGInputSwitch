@@ -4,6 +4,10 @@ Switch monitor inputs from your system tray or keyboard on Windows and Linux.
 Use LG’s alternate switching method or standard DDC/CI commands for compatible
 monitors, including Dell.
 
+<a href="https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.4"><img src="docs/badges/github-releases.svg" alt="Download LG Input Switch 1.3.4 for Windows or Linux from GitHub Releases" height="40"></a>
+
+**Support:** [Buy me a coffee](https://buymeacoffee.com/phillip9933) · [GitHub Sponsors](https://github.com/sponsors/phillip9933)
+
 ## Features
 
 - Named profiles for one monitor or a group, with an input choice for each monitor.
@@ -45,3 +49,7 @@ Reports stay local until you share them. Check for app updates in **Preferences 
 [AGPL-3.0-or-later](LICENSE.md). Dependencies retain their own terms; see
 [third-party notices](THIRD_PARTY_LICENSES.md) and [copyright details](COPYRIGHT.md).
 Originally inspired by [amildahl/amdddc-windows](https://github.com/amildahl/amdddc-windows).
+
+## AI usage
+
+I use AI tools for analysis, implementation, tests, and documentation. I decide what ships and take responsibility for maintaining it. Project-specific testing and known limitations are documented separately.
