@@ -55,6 +55,34 @@ struct DesktopWindowProbe
         check(!window.active().actions[0].enabled && !window.active().actions[0].autoDisabled,
               "Automatic recovery undid an explicit user disable");
     }
+    static void monitorPicker()
+    {
+        DesktopWindow window(true);
+        DesktopMonitor target{"LG 40U990A", -1, 3, false, QString(64, 'e'), "lg-40u990a"};
+        target.transport = WindowsDdcTransport;
+        target.nativeDisplay = "\\\\.\\DISPLAY3";
+        target.hardware["adapter_kind"] = "intel";
+        const auto initial = window.draft_.monitors.size();
+        window.discovery_.monitors.push_back(target);
+        QTimer::singleShot(0, &window, [&] {
+            window.discovery_.monitors.clear();
+            qobject_cast<QDialog *>(QApplication::activeModalWidget())->accept();
+        });
+        window.addMonitor(false);
+        check(window.draft_.monitors.size() == initial, "Disconnected choice was saved");
+        window.discovery_.monitors = {target};
+        QTimer::singleShot(0, &window, [&] {
+            auto other = target;
+            other.identity = QString(64, 'b');
+            other.nativeDisplay += "1";
+            window.discovery_.monitors.prepend(other);
+            qobject_cast<QDialog *>(QApplication::activeModalWidget())->accept();
+        });
+        window.addMonitor(false);
+        const auto &added = window.draft_.monitors.back();
+        check(added.identity == target.identity && added.method == "standard" &&
+                  added.inputs.front().code == "0x0f", "Intel picker used a stale index or LG codes");
+    }
     static void compactLayout(DesktopWindow &window)
     {
         const auto originalSize = window.size();
@@ -79,7 +107,8 @@ struct DesktopWindowProbe
                     check(window.rect().contains(save) && controls.bottom() < status.top() &&
                               status.bottom() < save.top(),
                           "Page/status/footer overlap at compact size");
-                    check(window.monitorCard_->isVisibleTo(&window) == (page == 0),
+                    check(window.monitorCard_->isVisibleTo(&window) ==
+                              (page == 0),
                           "Profile monitor controls remain on a global settings page");
                     if (page == 0 && editing)
                     {
@@ -122,7 +151,7 @@ struct DesktopWindowProbe
                     .boundingRect(QRect(0, 0, hint->width(), 10000), Qt::TextWordWrap, hint->text())
                     .height();
             check(hint->height() >= required, "Add Monitor explanatory text is clipped");
-            dialog->accept();
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
         });
         window.addMonitor();
         check(waitUntil([&] { return !window.busy_; }), "New monitor automatic input read did not finish");
@@ -170,7 +199,7 @@ struct DesktopWindowProbe
              {{"monitor-1", side.inputs[1].id}, {side.id, side.inputs[0].id}}}};
         window.captureDraft();
         window.draft_.profiles.push_back(group);
-        window.rebuildTabs();
+        window.rebuildProfileTabs();
         window.dirty();
         window.save();
         check(!window.dirty_, "Group configuration failed to save");
@@ -221,6 +250,7 @@ struct DesktopWindowProbe
         check(afterRetry.mid(beforeRetry.size()) == "--bus 31 setvcp 0x60 0xf --noverify\n" &&
                   !window.retry_->isEnabled(),
               "Retry resent successful monitor or remained active");
+        window.diagnosticProfile_->setCurrentIndex(window.diagnosticProfile_->findData("group"));
         window.diagnostics();
         check(waitUntil([&] { return !window.busy_; }), "Group diagnostics did not finish");
         const auto report = window.diagnosticReport_->toPlainText();
@@ -245,6 +275,7 @@ struct DesktopWindowProbe
               "View collection overwrote the external shortcut");
         // External Plasma changes must persist to the right profile without
         // overwriting a dirty form on any tab.
+        window.editProfile_->setChecked(true);
         window.table_->item(0, 1)->setText("Draft group name");
         window.syncShortcut(firstProfile, firstAction, QKeySequence("Ctrl+Alt+F9"));
         check(window.table_->item(0, 1)->text() == "Draft group name" && window.dirty_,
@@ -254,28 +285,41 @@ struct DesktopWindowProbe
         check(persisted.profiles[0].actions[0].shortcut == "CTRL+ALT+F9" &&
                   persisted.profiles[1].actions[0].name == "Linux PC",
               "External shortcut was saved to wrong profile or saved unrelated draft");
-        window.save();
+        window.finishActionEdit(true);
         check(!window.dirty_, "Draft did not save");
-        QTimer::singleShot(0, &window, [&window] {
-            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
-            check(dialog != nullptr, "Monitor editor did not open");
-            auto *method = dialog->findChild<QComboBox *>("monitorMethod");
-            check(method && method->currentData() == "standard",
-                  "Monitor method did not roundtrip to editor");
-            auto *read = dialog->findChild<QPushButton *>("readMonitorInputs");
-            read->click();
-            check(waitUntil([&] { return read->isEnabled(); }), "Advertised-input import did not finish");
-            auto *inputs = dialog->findChild<QTableWidget *>("monitorInputs");
-            check(inputs->rowCount() == 4,
-                  "Advertised input import removed configured inputs or did not append new value");
-            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
-        });
+        window.editProfile_->setChecked(true);
+        const auto original = window.active().actions;
+        window.table_->item(0, 1)->setText("Rename then cancel");
+        window.table_->verticalHeader()->moveSection(0, 1);
+        check(window.active().actions[1].id == original[0].id, "Drag lost action identity");
+        auto *trash = qobject_cast<QPushButton *>(window.table_->cellWidget(0, window.table_->columnCount()-1));
+        trash->click();
+        check(window.active().actions.size() == 1, "Per-row trash removed the wrong number of actions");
+        window.finishActionEdit(false);
+        check(window.active().actions.size() == original.size() &&
+              window.active().actions[0].id == original[0].id &&
+              window.active().actions[0].name == original[0].name && !window.dirty_,
+              "Cancel did not restore action contents and order");
+        window.editProfile_->setChecked(true);
+        window.table_->verticalHeader()->moveSection(0, 1);
+        window.finishActionEdit(true);
+        check(LoadDesktopWorkspace(warning).profiles[1].actions[0].id == original[1].id,
+              "Save actions did not persist the reordered IDs");
         window.editMonitor("synthetic-side");
-        check(window.dirty_ && window.draft_.monitors[1].inputs.size() == 4,
-              "Monitor editor did not retain advertised inputs");
-        check(waitUntil([&] { return !window.busy_; }),
-              "Automatic input refresh after editing did not finish");
-        window.save();
+        auto *editor = window.monitorEditor_;
+        check(editor && !QApplication::activeModalWidget(), "Monitor editing opened a dialog");
+        auto *method = editor->findChild<QComboBox *>("monitorMethod");
+        check(method && method->currentData() == "standard", "Monitor method lost in inline editor");
+        auto *read = editor->findChild<QPushButton *>("readMonitorInputs");
+        read->click();
+        check(waitUntil([&] { return read->isEnabled(); }), "Advertised-input import did not finish");
+        auto *inputs = editor->findChild<QTableWidget *>("monitorInputs");
+        check(inputs->rowCount() == 4, "Advertised input import lost configured inputs");
+        inputs->item(2, 0)->setCheckState(Qt::Unchecked);
+        editor->findChild<QPushButton *>("primary")->click();
+        check(!window.monitorEditor_ && window.draft_.monitors[1].inputs.size() == 4 &&
+              !LoadDesktopWorkspace(warning).monitors[1].inputs[2].enabled,
+              "Save inputs did not persist the edited list");
         QFile offline(missingMarker);
         check(offline.open(QIODevice::WriteOnly), "Could not create disconnect fixture");
         offline.close();
@@ -289,6 +333,79 @@ struct DesktopWindowProbe
         check(reloaded.profiles.size() == 2 && reloaded.monitors.size() == 2 &&
                   reloaded.monitors[1].method == "standard",
               "Saved workspace lost shared monitor settings");
+        QFile::remove(missingMarker);
+        window.showQuickPanel();
+        check(!window.busy_ && window.backgroundBrightness_, "Tray refresh blocked switching");
+        window.sendInput(firstProfile, firstAction);
+        check(window.busy_ && !window.backgroundBrightness_, "Switch did not preempt background brightness");
+        check(waitUntil([&] { return !window.busy_; }), "Queued shortcut did not finish");
+        window.quickPanel_->hide();
+        window.dirty();
+        window.selectedMonitorId_ = "synthetic-side";
+        window.populateMonitorTabs();
+        window.tabs_->setCurrentIndex(1);
+        check(waitUntil([&] { return !window.backgroundBrightness_; }), "Workspace brightness read did not complete");
+        auto *workspaceSlider = window.monitorInspector_->findChild<QSlider *>("brightness-synthetic-side");
+        check(workspaceSlider && workspaceSlider->isEnabled() && workspaceSlider->value() == 55,
+              "Pending profile edits blocked workspace brightness");
+        window.brightness_.clear();
+        window.scanInputs(true);
+        window.showQuickPanel();
+        check(waitUntil([&] { return !window.busy_ && !window.backgroundBrightness_; }),
+              "Opening the tray during discovery lost the brightness read");
+        auto *slider = window.quickPanel_->findChild<QSlider *>("brightness-synthetic-side");
+        check(slider && slider->isEnabled() && slider->value() == 55,
+              "Pending profile edits blocked tray brightness");
+        slider->setValue(42);
+        check(waitUntil([&] { return !window.busy_; }) && window.dirty_ &&
+                  window.brightness_.value("synthetic-side").percent == 42,
+              "Tray did not verify brightness independently of pending edits");
+        auto *draftSide = window.monitor("synthetic-side");
+        const auto originalRoute = draftSide->route;
+        draftSide->route = window.discovery_.monitors.front();
+        window.updateActions();
+        check(!window.quickPanel_->findChild<QSlider *>("brightness-synthetic-side")->isEnabled(),
+              "Tray allowed brightness on an unsaved connection");
+        window.updateBrightness({"synthetic-side"}, 75);
+        check(!window.busy_, "Queued a brightness write to an unsaved connection");
+        draftSide->route = originalRoute;
+        window.save();
+        check(waitUntil([&] { return !window.backgroundBrightness_; }), "Post-save brightness refresh timed out");
+        auto *trayMonitor = FindMonitor(window.saved_, "synthetic-side");
+        check(trayMonitor != nullptr, "Saved tray monitor missing");
+        QPushButton *button = nullptr;
+        for (auto *candidate : window.quickPanel_->findChildren<QPushButton *>("direct-input"))
+            if (candidate->accessibleName().startsWith(trayMonitor->name + " · "))
+            {
+                button = candidate;
+                break;
+            }
+        check(button && button->isEnabled(), "Individual monitor controls missing from tray");
+        QFile commands(log);
+        check(commands.open(QIODevice::ReadOnly), "Could not read tray command log");
+        const auto before = commands.readAll();
+        commands.close();
+        check(before.endsWith("--bus 31 setvcp 10 42\n"), "Brightness write targeted the wrong monitor");
+        button->click();
+        check(waitUntil([&] { return !window.busy_; }) && commands.open(QIODevice::ReadOnly),
+              "Individual tray switch did not complete");
+        const auto directCommands = commands.readAll().mid(before.size());
+        commands.close();
+        check(directCommands.startsWith("--bus 31 setvcp 0x60 ") && directCommands.count('\n') == 1,
+              "Individual tray switch also wrote to another monitor");
+        check(window.session_.state("group").pending.monitors.isEmpty(),
+              "Individual monitor switch kept obsolete group retry state");
+        const auto groupButtons = window.quickPanel_->findChildren<QPushButton *>("group-input");
+        check(groupButtons.size() == 2,
+              "Quick panel did not expose the configured group actions");
+        groupButtons.front()->click();
+        check(waitUntil([&] { return !window.busy_; }) && commands.open(QIODevice::ReadOnly),
+              "Tray group switch did not complete");
+        const auto groupCommands = commands.readAll().mid(before.size() + directCommands.size());
+        check(groupCommands.startsWith("--bus 29 setvcp 0xf4 ") &&
+                  groupCommands.contains("\n--bus 31 setvcp 0x60 ") && groupCommands.count('\n') == 2,
+              "Tray group switch did not use both configured routes");
+        window.quickPanel_->hide();
         compactLayout(window);
         Q_UNUSED(temp);
         Q_UNUSED(secondAction);
@@ -338,6 +455,87 @@ int main(int argc, char **argv)
           "Unwritable startup path was accepted");
 #endif
     DesktopWindowProbe::recoveryDraft();
+    DesktopWindowProbe::monitorPicker();
+    const QRect area(-1280, 0, 1280, 800);
+    for (const QRect icon : {QRect(-80, 800, 24, 24), QRect(-80, -24, 24, 24),
+                             QRect(-1304, 30, 24, 24), QRect(0, 30, 24, 24)})
+    {
+        const QSize size(420, 346);
+        const QRect popup(TrayQuickPanel::menuPosition(area, icon, size), size);
+        check(area.contains(popup) && !popup.intersects(icon) &&
+                  popup.adjusted(-1, -1, 1, 1).intersects(icon),
+              "Quick panel missed its tray edge or left the clicked monitor");
+    }
+    // A profile editor must not leave another page locked after its section is saved.
+    {
+        DesktopWindow scenario(true);
+        scenario.show();
+        auto *actions = scenario.findChild<QPushButton *>("editProfile");
+        auto *list = scenario.findChild<QTableWidget *>("inputs");
+        scenario.resize(1150, 1020);
+        QCoreApplication::processEvents();
+        const auto listTop = list->mapTo(&scenario, QPoint()).y();
+        actions->click();
+        QCoreApplication::processEvents();
+        auto *page = scenario.findChild<QScrollArea *>("profileScroll");
+        check(list->mapTo(&scenario, QPoint()).y() == listTop, "Action list jumped when editing began");
+        check(list->isVisible() && page->verticalScrollBar()->maximum() == 0 &&
+                  list->verticalScrollBar()->maximum() == 0,
+              "Tall action editor adds a scrollbar even when every row fits");
+        list->item(0, 1)->setText("A discarded rename");
+        for (auto *b : scenario.findChildren<QPushButton *>())
+            if (b->accessibleName() == "Cancel action edits") b->click();
+        auto *assign = scenario.findChild<QToolButton *>("monitorDetails");
+        assign->click();
+        for (auto *b : scenario.findChildren<QPushButton *>())
+            if (b->text() == "Save monitors") b->click();
+        check(!actions->isChecked() && !assign->isChecked(), "Profile editor remained open after saving");
+        // Even unrelated unsaved preferences cannot change a saved physical input command.
+        scenario.findChild<QCheckBox *>("systemAccent")->toggle();
+        scenario.findChild<QTabWidget *>("mainTabs")->setCurrentIndex(1);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        auto *direct = scenario.findChild<QPushButton *>("direct-input");
+        check(direct && direct->isEnabled(), "Profile cancel/save or an unrelated preference locked monitor switching");
+        direct->click();
+        check(scenario.findChild<QLabel *>("status")->text().contains(" → "), "Saved monitor switch did not dispatch");
+        scenario.findChild<QPushButton *>("editSavedMonitor")->click();
+        auto *inputEditor = scenario.findChild<QWidget *>("inlineMonitorEditor");
+        auto *ports = inputEditor->findChild<QTableWidget *>("monitorInputs");
+        auto *automatic = inputEditor->findChild<QCheckBox *>("automaticMonitorInputs");
+        const auto initial = ports->rowCount();
+        auto *add = inputEditor->findChild<QPushButton *>("addMonitorInput");
+        auto *remove = inputEditor->findChild<QPushButton *>("removeMonitorInput");
+        check(add && remove && automatic->isChecked() && add->isEnabled(), "Automatic monitor cannot add custom inputs");
+        add->click();
+        check(ports->rowCount() == initial + 1 && ports->currentRow() == initial &&
+                  !ports->isColumnHidden(1) && !automatic->isChecked(), "New input was not selected and editable");
+        remove->click();
+        check(ports->rowCount() == initial, "Remove input did not remove the selected custom input");
+        ports->setCurrentCell(0, 0);
+        auto answerRemoval = [&](QMessageBox::StandardButton choice) {
+            QTimer::singleShot(0, inputEditor, [choice] {
+                auto *prompt = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+                check(prompt && prompt->text().contains("disable"), "Missing mapped-input removal warning");
+                prompt->button(choice)->click();
+            });
+            remove->click();
+        };
+        answerRemoval(QMessageBox::Cancel);
+        check(ports->rowCount() == initial, "Declining removal changed the list");
+        answerRemoval(QMessageBox::Yes);
+        check(ports->rowCount() == initial - 1, "Confirmed removal kept the selected input");
+        inputEditor->findChild<QPushButton *>("primary")->click();
+        auto *tabs = scenario.findChild<QTabBar *>("monitorTabs");
+        check(tabs->isEnabled(), "Save inputs left monitor navigation locked");
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        scenario.findChild<QPushButton *>("editSavedMonitor")->click();
+        tabs->setCurrentIndex(1);
+        check(tabs->currentIndex() == 1 && !scenario.findChild<QWidget *>("inlineMonitorEditor")->isVisible(),
+              "An untouched input editor trapped monitor navigation");
+        scenario.findChild<QTabWidget *>("mainTabs")->setCurrentIndex(0);
+        check(list->isRowHidden(0), "Saving a removed input left its mapped action active");
+        scenario.findChild<QCheckBox *>("systemAccent")->toggle();
+    }
     {
         DesktopWindow preview(true);
         preview.show();
@@ -350,17 +548,34 @@ int main(int argc, char **argv)
         auto *appearance = preview.findChild<QComboBox *>("appearance");
         auto *table = preview.findChild<QTableWidget *>("inputs");
         auto *profiles = preview.findChild<QTabBar *>("profileTabs");
-        check(appearance && table && table->rowCount() == 4 && profiles && profiles->count() == 3,
+        check(appearance && table && table->rowCount() == 4 && profiles && profiles->count() == 4 && profiles->tabText(3) == "+",
               "Inputs or profile tabs missing");
+        auto *systemAccent = preview.findChild<QCheckBox *>("systemAccent");
+        check(systemAccent && !systemAccent->isChecked() &&
+                  app.palette().color(QPalette::Highlight) == QColor("#3268e8"),
+              "System appearance did not default to the icon blue");
+        const auto systemWindow = app.palette().color(QPalette::Window);
+        systemAccent->setChecked(true);
+        check(!app.palette().isBrushSet(QPalette::Active, QPalette::Highlight) &&
+                  app.palette().color(QPalette::Window) == systemWindow,
+              "System accent override changed the surface or retained the brand highlight");
+        systemAccent->setChecked(false);
         appearance->setCurrentIndex(appearance->findData("dark"));
         app.processEvents();
-        check(app.palette().color(QPalette::Window).lightness() < 60, "Dark palette not applied");
+        check(app.palette().color(QPalette::Inactive, QPalette::Highlight) == QColor("#3268e8") &&
+                  app.palette().color(QPalette::Window).lightness() < 60, "Dark palette not applied");
         appearance->setCurrentIndex(appearance->findData("light"));
         app.processEvents();
-        check(app.palette().color(QPalette::Window).lightness() > 220, "Light palette not applied");
+        check(app.palette().color(QPalette::Highlight) == QColor("#3268e8") &&
+                  app.palette().color(QPalette::Window).lightness() > 220, "Light palette not applied");
         check(!table->cellWidget(0, 2) && table->item(0, 2)->text() == "DisplayPort" &&
                   table->isColumnHidden(0),
               "Normal switching view still exposes input editors");
+        auto *switchAction = qobject_cast<QPushButton *>(table->cellWidget(0, table->columnCount() - 1));
+        check(switchAction && switchAction->text() == "Switch", "Profile action lacks a Switch button");
+        switchAction->click();
+        check(preview.findChild<QLabel *>("status")->text().contains("switching is disabled"),
+              "Switch button did not dispatch the preview action");
         preview.findChild<QPushButton *>("editProfile")->setChecked(true);
         auto *input = qobject_cast<QComboBox *>(table->cellWidget(0, 2));
         check(input && !input->currentText().contains("0x"), "Codes unexpectedly exposed by default");
@@ -369,6 +584,8 @@ int main(int argc, char **argv)
         table->item(0, 1)->setText("Unsaved label");
         profiles->setCurrentIndex(2);
         app.processEvents();
+        check(!preview.findChild<QPushButton *>("editProfile")->isChecked(), "Opening another profile inherited the previous editor");
+        preview.findChild<QPushButton *>("editProfile")->click();
         check(table->rowCount() == 2 && table->columnCount() == 6 && !table->isColumnHidden(3),
               "Group lacks per-monitor mappings");
         auto *first = qobject_cast<QComboBox *>(table->cellWidget(0, 2));
@@ -383,13 +600,35 @@ int main(int argc, char **argv)
         app.processEvents();
         check(table->item(0, 1)->text() == "Unsaved group label", "Tab switch discarded group draft");
         auto *navigation = preview.findChild<QTabWidget *>("mainTabs");
-        check(navigation->tabText(0) == "Profiles", "Global navigation is not above the profile page");
-        navigation->setCurrentIndex(3);
+        check(navigation->count() == 3 && navigation->tabText(0) == "Input Profiles" &&
+                  navigation->tabText(1) == "Monitors" && navigation->tabText(2) == "Settings" &&
+                  preview.findChild<QListWidget *>("workspaceNavigation"),
+              "Workspace navigation is missing");
+        navigation->setCurrentIndex(1);
+        auto *monitorTabs = preview.findChild<QTabBar *>("monitorTabs");
+        check(monitorTabs && monitorTabs->count() == 3 && monitorTabs->tabText(2) == "+",
+              "Monitors lack matching tabs and add control");
+        monitorTabs->setCurrentIndex(1);
+        app.processEvents();
+        auto *editMonitor = preview.findChild<QPushButton *>("editSavedMonitor");
+        check(editMonitor && editMonitor->isVisible(), "Monitor inspector lacks a direct edit button");
+        editMonitor->click();
+        auto *editor = preview.findChild<QWidget *>("inlineMonitorEditor");
+        check(editor && !QApplication::activeModalWidget() &&
+              editor->findChild<QLineEdit *>("monitorName")->text() == "Side monitor",
+              "Monitor tab did not edit the selected monitor inline");
+        editor->findChild<QLineEdit *>("monitorName")->setText("Cancel this change");
+        editor->findChild<QPushButton *>("cancelInputs")->click();
+        check(monitorTabs->tabText(1) == "Side monitor", "Cancel renamed the monitor");
+        check(monitorTabs->currentIndex() == 1, "Rebuilding controls changed the selected monitor tab");
+        monitorTabs->setCurrentIndex(2);
+        check(monitorTabs->currentIndex() == 1, "Unavailable add-monitor action changed the selected monitor");
+        navigation->setCurrentIndex(2);
         auto *diagnosticProfile = preview.findChild<QComboBox *>("diagnosticProfile");
         diagnosticProfile->setCurrentIndex(0);
         app.processEvents();
-        check(profiles->currentIndex() == 0 && table->item(0, 1)->text() == "Unsaved label",
-              "Diagnostics profile selector lost draft edits or changed the wrong target");
+        check(profiles->currentIndex() == 2 && table->item(0, 1)->text() == "Unsaved group label",
+              "Diagnostics changed the active profile or its draft");
         diagnosticProfile->setCurrentIndex(2);
         app.processEvents();
         auto *diagnosticRun = preview.findChild<QPushButton *>("diagnosticRun");
@@ -403,22 +642,28 @@ int main(int argc, char **argv)
                   !report->toPlainText().contains("Unsaved"),
               "Preview report used hardware or leaked labels");
         navigation->setCurrentIndex(0);
-        auto *status = preview.findChild<QLabel *>("status");
-        qobject_cast<QPushButton *>(table->cellWidget(0, table->columnCount() - 1))->click();
-        check(status->text().contains("preview", Qt::CaseInsensitive), "Preview attempted a live operation");
+        auto *tray = preview.findChild<QSystemTrayIcon *>();
+        preview.hide();
+        tray->activated(QSystemTrayIcon::Trigger);
+        tray->activated(QSystemTrayIcon::DoubleClick);
+        check(preview.isVisible() && !preview.findChild<QDialog *>("quickPanel")->isVisible(),
+              "Double-click did not open the workspace");
         QTimer::singleShot(0, &preview, [] {
             auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
             check(dialog != nullptr, "Add profile dialog missing");
             dialog->setTextValue("New profile");
             dialog->accept();
         });
-        preview.findChild<QPushButton *>("addProfile")->click();
-        check(profiles->count() == 4 && table->rowCount() == 4, "Add profile did not create independent tab");
+        profiles->setCurrentIndex(profiles->count() - 1);
+        check(profiles->count() == 5 && profiles->currentIndex() == 3 &&
+                  profiles->tabText(3) == "New profile" && profiles->tabText(4) == "+" && table->rowCount() == 4,
+              "Add profile did not create independent tab");
         QTimer::singleShot(0, &preview, [] {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             check(dialog != nullptr, "Add monitor dialog missing");
             dialog->accept();
         });
+        preview.findChild<QToolButton *>("monitorDetails")->setChecked(true);
         preview.findChild<QPushButton *>("addMonitor")->click();
         check(table->columnCount() == 6 && qobject_cast<QComboBox *>(table->cellWidget(0, 3)) != nullptr,
               "Add monitor did not expose independent per-monitor mappings");
@@ -444,9 +689,14 @@ int main(int argc, char **argv)
          "side:SIDEPRIVATE\\n'; fi\n"
          "elif [ \"$1\" = --version ]; then echo 'ddcutil 2.2.0'\n"
          "else\ncase \"$*\" in\n"
+         "'--bus 31 setvcp 10 '*) printf '%s\\n' \"$*\" >> '" + log +
+         "'; printf '%s\\n' \"$5\" > '" + temporary.filePath("brightness") + "';;\n"
          "*setvcp*) printf '%s\\n' \"$*\" >> '" +
          log + "'; if [ \"$2\" = 31 ] && [ -f '" + failMarker +
          "' ]; then exit 87; fi;;\n"
+         "'--bus 31 getvcp 10 --terse') value=55; if [ -f '" + temporary.filePath("brightness") +
+         "' ]; then read -r value < '" + temporary.filePath("brightness") +
+         "'; fi; printf 'VCP 10 C %s 100\\n' \"$value\";;\n"
          "*'getvcp 10 --terse') echo 'VCP 10 C 55 100';;\n"
          "*'getvcp 60 --terse') echo 'VCP 60 SNC x0f';;\n"
          "'--bus 31 capabilities --terse') echo '(model(PRIVATE)vcp(10 60(1B 11 12))mccs_ver(2.2))';;\n"

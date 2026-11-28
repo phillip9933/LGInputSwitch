@@ -11,7 +11,9 @@ unix:!macx:exists(/usr/include/KF6/KGlobalAccel/KGlobalAccel) {
 
 SOURCES += profiles.cpp diagnostics.cpp capabilities.cpp legacy_config.cpp
 
-SOURCES += monitor_inputs.cpp monitor_identity.cpp windows_monitors.cpp
+SOURCES += monitor_input_editor.cpp monitor_inputs.cpp monitor_identity.cpp windows_monitors.cpp
 
 QT += network
 SOURCES += update_policy.cpp update_install.cpp updates.cpp
+
+include(tray_placement.pri)

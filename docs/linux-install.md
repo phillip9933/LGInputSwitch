@@ -8,13 +8,13 @@ and other desktops remain future work.
 
 ## CachyOS / Arch package
 
-The [1.3.4 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.4) contains the native `.pkg.tar.zst` package and SHA256SUMS alongside the Windows executable.
+The stable [1.3.4 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.4) contains the native `.pkg.tar.zst` package and SHA256SUMS alongside the Windows executable.
 GitHub supplies application source automatically. CI’s `LGInputSwitch-CachyOS-Arch`
 artifact retains the debug package, source archive, recipe and source revision.
 This is not yet an AUR package. Build against a current Arch/CachyOS system; rolling-release
 packages may require a system update before installation.
 
-Verify checksums in the extracted directory:
+For [2.0.0 Beta 1](https://github.com/phillip9933/LGInputSwitch/releases/tag/2.0.0-beta.1), select the package named `lginputswitch-2.0.0beta1-1-x86_64.pkg.tar.zst`. Download the package and its matching `SHA256SUMS` to the same folder, then run:
 
 ```
 sha256sum --ignore-missing -c SHA256SUMS

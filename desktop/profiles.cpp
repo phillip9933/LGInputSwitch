@@ -18,7 +18,7 @@ QJsonArray InputJson(const QVector<DesktopInput> &inputs)
 {
     QJsonArray result;
     for (const auto &input : inputs)
-        result.append(QJsonObject{{"id", input.id}, {"label", input.label}, {"code", input.code}});
+        result.append(QJsonObject{{"id", input.id}, {"label", input.label}, {"code", input.code}, {"enabled", input.enabled}});
     return result;
 }
 QJsonObject RouteJson(const DesktopMonitor &route)
@@ -177,6 +177,12 @@ DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy)
     w.activeProfile = p.id;
     return w;
 }
+bool SameProfileCommands(const DesktopWorkspace &before, const DesktopWorkspace &after, const QString &id)
+{
+    const auto *old = FindProfile(before, id);
+    const auto *current = FindProfile(after, id);
+    return old && current && ProfileSignature(before, *old) == ProfileSignature(after, *current);
+}
 QJsonObject WorkspaceJson(const DesktopWorkspace &w)
 {
     QJsonArray monitors, profiles;
@@ -232,6 +238,7 @@ QJsonObject WorkspaceJson(const DesktopWorkspace &w)
             {"monitors", monitors},
             {"profiles", profiles},
             {"preferences", QJsonObject{{"appearance", c.appearance},
+                                        {"systemAccent", c.systemAccent},
                                         {"notifications", c.notifications},
                                         {"startup", c.startup},
                                         {"globalShortcuts", c.globalShortcuts},
@@ -391,6 +398,7 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
     DesktopWorkspace w;
     const auto c = json["preferences"].toObject();
     w.preferences.appearance = c["appearance"].toString("system");
+    w.preferences.systemAccent = c["systemAccent"].toBool(false);
     w.preferences.notifications = c["notifications"].toBool(true);
     w.preferences.startup = c["startup"].toBool();
     w.preferences.globalShortcuts = c["globalShortcuts"].toBool();
@@ -417,7 +425,7 @@ bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &out, QString &err
         for (auto input : j["inputs"].toArray())
         {
             const auto i = input.toObject();
-            m.inputs.push_back({i["label"].toString(), i["code"].toString(), {}, true, i["id"].toString()});
+            m.inputs.push_back({i["label"].toString(), i["code"].toString(), {}, i["enabled"].toBool(true), i["id"].toString()});
         }
         m.autoInputs = j.contains("autoInputs") ? j["autoInputs"].toBool() : IsPresetInputList(m);
         w.monitors.push_back(m);
@@ -631,16 +639,22 @@ MonitorResolution ResolveSavedMonitor(const SavedMonitor &m, const Discovery &d,
         return {false, {}, "Disconnected or identity changed. Select the connection again."};
     }
     if (confirmed.contains(m.id))
-    {
-        const auto expected = confirmed.value(m.id);
-        QVector<DesktopMonitor> matches;
-        for (const auto &candidate : d.monitors)
-            if (MonitorRouteKey(candidate) == MonitorRouteKey(expected) &&
-                candidate.label == expected.label && candidate.identity == expected.identity)
-                matches.push_back(candidate);
-        if (matches.size() == 1)
-            return {true, matches.front(), {}};
-    }
+        return ResolveMonitorConnection(confirmed.value(m.id), d);
+    return {false, {}, "Select the connection to confirm this monitor."};
+}
+MonitorResolution ResolveMonitorConnection(const DesktopMonitor &expected, const Discovery &discovery)
+{
+    const DesktopMonitor *match = nullptr;
+    for (const auto &candidate : discovery.monitors)
+        if (MonitorRouteKey(candidate) == MonitorRouteKey(expected) &&
+            candidate.label == expected.label && candidate.identity == expected.identity)
+        {
+            if (match)
+                return {false, {}, "Monitor connection is ambiguous."};
+            match = &candidate;
+        }
+    if (match)
+        return {true, *match, {}};
     return {false, {}, "Select the connection to confirm this monitor."};
 }
 bool ProfileSwitchResult::complete() const
@@ -749,10 +763,10 @@ QString ProfileSession::cycle(const MonitorProfile &p) const
 void ProfileSession::accept(const DesktopWorkspace &w, const ProfileSwitchResult &result, bool retry)
 {
     auto combined = result;
-    auto &runtime = states_[result.profileId];
-    if (retry && runtime.pending.actionId == result.actionId)
+    const auto previous = state(result.profileId);
+    if (retry && previous.pending.actionId == result.actionId)
     {
-        combined = runtime.pending;
+        combined = previous.pending;
         for (const auto &entry : result.monitors)
             for (auto &old : combined.monitors)
                 if (old.monitorId == entry.monitorId)
@@ -773,6 +787,11 @@ void ProfileSession::accept(const DesktopWorkspace &w, const ProfileSwitchResult
         if (overlap)
             it.value() = {};
     }
+    // An individual monitor command invalidates overlapping profile history,
+    // but has no profile history of its own.
+    if (result.profileId.isEmpty())
+        return;
+    auto &runtime = states_[result.profileId];
     runtime.pending = combined.complete() ? ProfileSwitchResult{} : combined;
     if (combined.complete())
     {
@@ -784,8 +803,7 @@ void ProfileSession::configurationChanged(const DesktopWorkspace &before, const 
 {
     for (auto it = states_.begin(); it != states_.end();)
     {
-        const auto *old = FindProfile(before, it.key()), *next = FindProfile(after, it.key());
-        if (!old || !next || ProfileSignature(before, *old) != ProfileSignature(after, *next))
+        if (!SameProfileCommands(before, after, it.key()))
             it = states_.erase(it);
         else
             ++it;

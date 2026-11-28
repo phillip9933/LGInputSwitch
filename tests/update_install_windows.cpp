@@ -31,6 +31,13 @@ int main(int argc, char **argv) {
     check(argc == 2, "Candidate argument missing");
     const auto candidate = arguments.at(1);
     check(WindowsExecutableVersion(candidate) == "99.0.0", "Candidate version could not be read");
+    if (!WindowsUpdateAllowed()) {
+        QString error;
+        check(!StartWindowsUpdate({}, candidate, error) && error == WindowsUpdatePrivilegeMessage,
+              "Elevated updater failed to reject installation before staging");
+        std::cout << "Elevated installation blocked. Replacement and rollback require a standard user.\n";
+        return 0;
+    }
     for (const QString mode : {QString("success"), QString("tamper"), QString("crash")}) {
         const bool tamper = mode == "tamper", rollback = mode != "success";
         QTemporaryDir temp;

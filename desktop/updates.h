@@ -23,7 +23,6 @@ class UpdatePanel : public QWidget {
                int redirects = 0, bool binary = false);
     void download();
     void install();
-    bool linuxManaged() const;
   public:
     explicit UpdatePanel(bool preview, QWidget *parent = nullptr, QNetworkAccessManager *transport = nullptr,
                          QSettings *settings = nullptr);

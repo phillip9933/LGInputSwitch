@@ -155,12 +155,11 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
 #ifdef Q_OS_WIN
     if (c.transport == WindowsDdcTransport)
     {
-        // Validate the method before starting a child: never silently change an
-        // LG 0xF4/source-0x50 command into a standard 0x60 command.
-        if (c.method != "standard")
-            return DispatchNativeWindowsInput(c, code, {}, {});
+        QStringList args{"--windows-switch", c.nativeDisplay, c.targetIdentity, code};
+        if (c.method == "lg")
+            args.append(c.source);
         const auto probe = RunDesktopProcess(QCoreApplication::applicationFilePath(),
-            {"--windows-switch", c.nativeDisplay, c.targetIdentity, code}, 10000);
+                                             args, 10000);
         if (probe.status != "finished" || probe.exitCode != 0)
             return {lg::SwitchStatus::TransportFailure, probe.exitCode,
                     ("Windows input command " + probe.status + "; physical switch unverified.").toStdString()};
@@ -191,5 +190,57 @@ lg::SwitchResult SendDesktopInput(const DesktopConfig &c, const QString &code)
         lg::SwitchStatus::TransportFailure, result.exitCode,
         (QString("ddcutil %1 (code %2). Check cable and I2C access.").arg(result.status).arg(result.exitCode))
             .toStdString()};
+#endif
+}
+
+MonitorBrightness AccessMonitorBrightness(const DesktopMonitor &target, int percent)
+{
+    if (percent < -1 || percent > 100)
+        return {-1, "Invalid brightness."};
+#ifdef Q_OS_WIN
+    if (target.identity.isEmpty())
+        return {-1, "Brightness needs an identifiable monitor connection."};
+    const auto result = RunDesktopProcess(QCoreApplication::applicationFilePath(),
+        {"--windows-brightness", target.nativeDisplay, target.identity, QString::number(percent)}, 10000);
+    if (result.status == "finished" && result.exitCode == 0)
+    {
+        const auto value = QJsonDocument::fromJson(result.output).object();
+        return {value["percent"].toInt(-1), value["status"].toString("Brightness unavailable.")};
+    }
+    return {-1, "Windows brightness request " + result.status + "."};
+#else
+    if (!target.transport.isEmpty() || target.display < 0 || (!target.bus && target.display == 0))
+        return {-1, "Brightness needs a connected monitor."};
+    const QStringList selector{target.bus ? "--bus" : "--display", QString::number(target.display)};
+    const auto read = [&]() -> QPair<int, int> {
+        const auto result = RunDesktopProcess("ddcutil", selector + QStringList{"getvcp", "10", "--terse"}, 5000);
+        if (result.status != "finished" || result.exitCode != 0)
+            return {-1, 0};
+        const auto match = QRegularExpression(R"(^VCP\s+10\s+C\s+(\d{1,5})\s+(\d{1,5})$)")
+                               .match(QString::fromLocal8Bit(result.output).trimmed());
+        const int value = match.captured(1).toInt(), maximum = match.captured(2).toInt();
+        return maximum > 0 && maximum <= 65535 && value <= maximum
+            ? qMakePair(value, maximum) : qMakePair(-1, 0);
+    };
+    auto [value, maximum] = read();
+    if (!maximum)
+        return {-1, "This monitor did not report brightness."};
+    if (percent >= 0)
+    {
+        const int requested = (maximum * percent + 50) / 100;
+        if (requested != value)
+        {
+            const auto set = RunDesktopProcess("ddcutil",
+                selector + QStringList{"setvcp", "10", QString::number(requested)}, 7000);
+            const auto confirmed = read();
+            if (!confirmed.second)
+                return {-1, "Could not confirm brightness after the request."};
+            value = confirmed.first;
+            maximum = confirmed.second;
+            if (set.status != "finished" || set.exitCode != 0 || value != requested)
+                return {(value * 100 + maximum / 2) / maximum, "The monitor did not confirm the requested brightness."};
+        }
+    }
+    return {(value * 100 + maximum / 2) / maximum, {}};
 #endif
 }

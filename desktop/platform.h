@@ -18,6 +18,7 @@ struct DesktopConfig
     int adapter = -1, display = -1, debounce = 750;
     bool bus = false, notifications = true, startup = false, globalShortcuts = false;
     QString transport, nativeDisplay, targetIdentity;
+    bool systemAccent = false;
 };
 struct DesktopMonitor
 {
@@ -36,3 +37,10 @@ struct Discovery
 };
 Discovery DiscoverDesktopMonitors();
 lg::SwitchResult SendDesktopInput(const DesktopConfig &config, const QString &code);
+
+struct MonitorBrightness
+{
+    int percent = -1;
+    QString status;
+};
+MonitorBrightness AccessMonitorBrightness(const DesktopMonitor &target, int percent = -1);

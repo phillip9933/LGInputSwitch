@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import tarfile
 import tempfile
 import unittest
@@ -21,6 +22,17 @@ publisher = module('publish-release')
 windows = module('windows-release')
 
 class ReleasePackaging(unittest.TestCase):
+    def test_release_workflow_dependency_pins(self):
+        for filename in ('build.yml', 'release.yml'):
+            workflow = (ROOT / '.github/workflows' / filename).read_text()
+            for kind, ref in re.findall(r'^\s*(?:-\s+)?(uses|container):\s*([^\s#]+)', workflow, re.M):
+                ref = ref.strip('"\'')
+                with self.subTest(workflow=filename, ref=ref):
+                    if kind == 'container':
+                        self.assertRegex(ref, r'@sha256:[0-9a-f]{64}$')
+                    elif not ref.startswith('./'):
+                        self.assertRegex(ref, r'@[0-9a-f]{40}$')
+
     def test_cross_platform_revision_line_endings(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -46,6 +58,8 @@ class ReleasePackaging(unittest.TestCase):
             def fake_run(*args):
                 nonlocal created
                 calls.append(args)
+                if args[:2] == ('git', 'ls-remote'):
+                    return 'fixture\trefs/tags/1.1.0\n'
                 if args[0] == 'git':
                     return 'fixture\n'
                 if args[:2] == ('gh', 'api'):
@@ -67,6 +81,53 @@ class ReleasePackaging(unittest.TestCase):
                               'lginputswitch-1.1.0-1-x86_64.pkg.tar.zst', 'SHA256SUMS'})
             self.assertEqual(len((root / 'publish/SHA256SUMS').read_text().splitlines()), 2)
             self.assertTrue(any('--prerelease=false' in call and '--latest' in call for call in calls))
+            self.assertTrue(any('--verify-tag' in call for call in calls))
+            # Retry a partial upload in the same working directory and forbid clobber.
+            release = {'tag_name': '1.1.0', 'draft': True, 'target_commitish': 'fixture',
+                       'assets': [{'name': 'SHA256SUMS', 'digest': 'sha256:' + hashlib.sha256(
+                           (root / 'publish/SHA256SUMS').read_bytes()).hexdigest()}]}
+            def resume(*args):
+                if args[:2] == ('gh', 'api'):
+                    return json.dumps([[release]])
+                if args[:3] == ('gh', 'release', 'upload'):
+                    self.assertEqual({Path(a).name for a in args[6:]}, {fixtures['windows'][0], fixtures['linux'][0]})
+                    for file in map(Path, args[6:]):
+                        release['assets'].append({'name': file.name,
+                            'digest': 'sha256:' + hashlib.sha256(file.read_bytes()).hexdigest()})
+                    return ''
+                self.assertNotEqual(args[:3], ('gh', 'release', 'create'))
+                return fake_run(*args)
+            with patch.object(publisher, 'run', resume), patch.dict(os.environ,
+                    GITHUB_SHA='fixture', GITHUB_REPOSITORY='owner/repo'):
+                publisher.publish(root, '1.1.0')
+                release['assets'].append({'name': 'extra', 'digest': 'sha256:unknown'})
+                with self.assertRaisesRegex(ValueError, 'draft asset'):
+                    publisher.publish(root, '1.1.0')
+                release['assets'].pop()
+                release['assets'][0]['digest'] = 'changed'
+                with self.assertRaisesRegex(ValueError, 'draft asset'):
+                    publisher.publish(root, '1.1.0')
+                release['target_commitish'] = 'different'
+                with self.assertRaisesRegex(ValueError, 'tested revision'):
+                    publisher.publish(root, '1.1.0')
+                release['draft'] = False
+                with self.assertRaisesRegex(ValueError, 'published builds'):
+                    publisher.publish(root, '1.1.0')
+
+
+    def test_release_tag_must_point_to_tested_commit(self):
+        refs = 'tag-object\trefs/tags/1.1.0\ncommit\trefs/tags/1.1.0^{}\n'
+        with patch.object(publisher, 'run', return_value=refs) as mocked:
+            publisher.ensure_release_tag('owner/repo', '1.1.0', 'commit')
+            with self.assertRaisesRegex(ValueError, 'different revision'):
+                publisher.ensure_release_tag('owner/repo', '1.1.0', 'other')
+            self.assertTrue(all(call.args[:2] == ('git', 'ls-remote') for call in mocked.call_args_list))
+        with patch.object(publisher, 'run', return_value='') as mocked:
+            with self.assertRaisesRegex(ValueError, 'tag is missing'):
+                publisher.ensure_release_tag('owner/repo', '1.1.0', 'commit')
+            mocked.assert_called_once()
+            publisher.ensure_release_tag('owner/repo', '1.1.0', 'commit', create=True)
+            self.assertEqual(mocked.call_args.args[:4], ('gh', 'api', '--method', 'POST'))
 
     def test_numeric_versions_match_source(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -81,6 +142,10 @@ class ReleasePackaging(unittest.TestCase):
                         publisher.validate()
                 with patch.dict(os.environ, {'RELEASE_VERSION': '1.1.0'}):
                     self.assertEqual(publisher.validate(), '1.1.0')
+                (root / 'desktop/main.cpp').write_text('app.setApplicationVersion("1.1.0-beta.1");')
+                (root / 'docs/releases/1.1.0-beta.1.md').write_text('Beta notes')
+                with patch.dict(os.environ, {'RELEASE_VERSION': '1.1.0-beta.1'}):
+                    self.assertEqual(publisher.validate(), '1.1.0-beta.1')
 
     def test_dependency_corruption_rejected_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:

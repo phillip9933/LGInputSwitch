@@ -388,6 +388,7 @@ int main(int argc, char **argv)
     check(MigrateDesktopConfig(winLegacy).profiles[0].cycleShortcut.contains("META"),
           "Legacy Windows modifier did not migrate to portable Qt keys");
     auto w = fixture();
+    w.preferences.systemAccent = true;
     check(ValidateWorkspace(w, error), qPrintable(error));
     DesktopWorkspace parsed;
     check(ParseWorkspace(WorkspaceJson(w), parsed, error) && WorkspaceJson(w) == WorkspaceJson(parsed),

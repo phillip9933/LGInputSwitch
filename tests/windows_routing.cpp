@@ -11,6 +11,14 @@ static void check(bool value, const char *message)
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+    check(NativeWindowsAdapterKind("PCI\\VEN_8086&DEV_1234", "Intel Graphics") == "intel" &&
+              NativeWindowsAdapterKind("pci\\ven_8086&dev_1234", "Graphics") == "intel" &&
+              NativeWindowsAdapterKind("PCI\\VEN_8086&DEV_1234", "DisplayLink adapter") == "displaylink" &&
+              NativeWindowsAdapterKind("PCI\\VEN_80860&DEV_1234", "Intel Graphics") == "other",
+          "Intel identification confused another vendor or a DisplayLink route");
+    check(SafeMonitorHardware({{"adapter_kind", "intel"}, {"serial", "private"}}) ==
+              QJsonObject{{"edid_valid", false}, {"adapter_kind", "intel"}},
+          "Intel diagnostic metadata was dropped or leaked identifying fields");
     const QString name = "\\\\.\\DISPLAY6", identity(64, 'a');
     const QJsonObject record{{"windows_display", name}, {"identity", identity},
                              {"label", "LG monitor · Display 6 · Standard DDC/CI"},
@@ -70,6 +78,20 @@ int main(int argc, char **argv)
     auto result = DispatchNativeWindowsInput(config, "0x90", mixed, write);
     check(!result.sent() && sends == 1 && result.detail.find("custom source") != std::string::npos,
           "LG alternate command silently fell back to Windows standard DDC/CI");
+    auto nvidia = native;
+    nvidia.monitors[0].hardware["adapter_kind"] = "nvidia";
+    int nvidiaSends = 0;
+    const auto rawWrite = [&](const DesktopMonitor &target, const lg::InputCommand &command) {
+        ++nvidiaSends;
+        check(target.identity == identity && command.featureCode == 0xf4 &&
+                  command.sourceAddress == 0x50 && command.value == 0x90,
+              "NVIDIA writer did not get the exact LG command on the intended monitor");
+        return lg::SwitchResult{lg::SwitchStatus::CommandSent, 0, "Synthetic raw write"};
+    };
+    check(DispatchNativeWindowsInput(config, "0x90", nvidia, write, rawWrite).sent() &&
+              nvidiaSends == 1 && sends == 1, "NVIDIA command did not use the raw writer");
+    check(!DispatchNativeWindowsInput(config, "0x90", displaylink, write, rawWrite).sent() &&
+              nvidiaSends == 1 && sends == 1, "DisplayLink command entered a GPU writer");
     config.method = "standard";
     check(!DispatchNativeWindowsInput(config, "not-an-input", mixed, write).sent() && sends == 1,
           "Invalid code reached the native writer");
@@ -87,5 +109,18 @@ int main(int argc, char **argv)
             return lg::SwitchResult{lg::SwitchStatus::TransportFailure, 31, "Synthetic driver failure"};
         });
     check(!result.sent() && result.nativeCode == 31, "Native driver failure was reported as success");
+    auto intel = native;
+    intel.monitors[0].hardware["adapter_kind"] = "intel";
+    check(MergeWindowsDiscovery(amd, intel).monitors.size() == 2,
+          "Intel output disappeared behind an AMD adapter with a matching fingerprint");
+    const int beforeIntel = sends;
+    check(DispatchNativeWindowsInput(config, "0x11", intel, write, rawWrite).sent() &&
+              sends == beforeIntel + 1 && nvidiaSends == 1,
+          "Intel standard switching failed to use the Windows monitor writer");
+    config.method = "lg";
+    result = DispatchNativeWindowsInput(config, "0x90", intel, write, rawWrite);
+    check(!result.sent() && result.detail.find("Intel") != std::string::npos &&
+              sends == beforeIntel + 1 && nvidiaSends == 1,
+          "Intel alternate switching silently sent a different command");
     std::cout << "Native Windows discovery, route isolation and write policy checks passed\n";
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a checked numeric full release only after the reusable build passes."""
+"""Publish a checked stable or beta release only after the reusable build passes."""
 import argparse
 import hashlib
 import json
@@ -22,17 +22,45 @@ def find_release(repository, version):
                  if release['tag_name'] == version), None)
 
 
+def ensure_release_tag(repository, version, revision, create=False):
+    """Create the tag without force, or verify an existing tag's peeled commit."""
+    remote = f'https://github.com/{repository}.git'
+    ref = f'refs/tags/{version}'
+    entries = dict(line.split('\t', 1)[::-1] for line in
+                   run('git', 'ls-remote', '--tags', remote, ref, ref + '^{}').splitlines())
+    if ref in entries:
+        if entries.get(ref + '^{}', entries[ref]) != revision:
+            raise ValueError('Existing release tag points to a different revision')
+        return
+    if not create:
+        raise ValueError('Release tag is missing')
+    run('gh', 'api', '--method', 'POST', f'repos/{repository}/git/refs',
+        '-f', f'ref={ref}', '-f', f'sha={revision}')
+
+
 def validate():
     version = os.environ['RELEASE_VERSION']
-    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
-        raise ValueError('Release tags must contain only a numeric major.minor.patch version')
+    match = re.fullmatch(r'((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))(?:-beta\.[1-9][0-9]*)?', version)
+    if not match:
+        raise ValueError('Expected major.minor.patch with an optional -beta.N suffix')
     cmake = (ROOT / 'CMakeLists.txt').read_text()
     main = (ROOT / 'desktop/main.cpp').read_text()
-    if f'VERSION {version} ' not in cmake or f'setApplicationVersion("{version}")' not in main:
+    if f'VERSION {match.group(1)} ' not in cmake or f'setApplicationVersion("{version}")' not in main:
         raise ValueError('Version must match CMake and the desktop application')
     if not (ROOT / f'docs/releases/{version}.md').is_file():
         raise ValueError('Release notes missing')
     return version
+
+
+def missing_draft_assets(release, revision, expected):
+    if not release or not release['draft'] or release['target_commitish'] != revision:
+        raise ValueError('Only a draft targeting the tested revision can be resumed')
+    remaining = dict(expected)
+    for asset in release['assets']:
+        name = asset['name']
+        if name not in remaining or asset.get('digest') != remaining.pop(name):
+            raise ValueError('Unexpected, duplicate, or mismatched draft asset: ' + name)
+    return sorted(remaining)
 
 
 def publish(assets, version):
@@ -40,12 +68,14 @@ def publish(assets, version):
     if revision != os.environ['GITHUB_SHA']:
         raise ValueError('Checkout differs from tested workflow revision')
     repository = os.environ['GITHUB_REPOSITORY']
-    if find_release(repository, version) is not None:
+    release = find_release(repository, version)
+    if release and not release['draft']:
         raise ValueError('A release with this version already exists; never overwrite published builds')
     output = assets / 'publish'
-    output.mkdir()
+    output.mkdir(exist_ok=True)
+    arch_version = version.replace('-beta.', 'beta')
     selected = {'windows': f'LGInputSwitch-{version}-Windows-x64.exe',
-                'linux': f'lginputswitch-{version}-1-x86_64.pkg.tar.zst'}
+                'linux': f'lginputswitch-{arch_version}-1-x86_64.pkg.tar.zst'}
     for kind, checksum in [('windows', 'SHA256SUMS-Windows'), ('linux', 'SHA256SUMS')]:
         directory = assets / kind
         if (directory / 'SOURCE_REVISION').read_text().strip() != revision:
@@ -64,20 +94,27 @@ def publish(assets, version):
         if name not in verified:
             raise ValueError('Release asset missing or unchecked: ' + name)
         (output / name).write_bytes((directory / name).read_bytes())
-    hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(output.iterdir())}
+    hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(output / name for name in selected.values())}
     (output / 'SHA256SUMS').write_text(''.join(value + '  ' + name + '\n' for name, value in hashes.items()))
-    files = sorted(p for p in output.iterdir() if p.is_file())
-    run('gh', 'release', 'create', version, '--repo', repository, '--draft', '--target', revision,
-        '--title', 'LG Input Switch ' + version, '--notes-file', str(ROOT / f'docs/releases/{version}.md'),
-        *map(str, files))
-    release = find_release(repository, version)
-    if release is None or not release['draft'] or release['target_commitish'] != revision:
-        raise ValueError('Uploaded draft release does not match tested revision')
-    remote = {entry['name']: entry.get('digest') for entry in release['assets']}
-    for path in files:
-        if remote.get(path.name) != 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest():
-            raise ValueError('Uploaded release asset hash mismatch: ' + path.name)
-    run('gh', 'release', 'edit', version, '--repo', repository, '--draft=false', '--prerelease=false', '--latest')
+    expected = {name: 'sha256:' + digest for name, digest in hashes.items()}
+    manifest = output / 'SHA256SUMS'
+    expected[manifest.name] = 'sha256:' + hashlib.sha256(manifest.read_bytes()).hexdigest()
+    ensure_release_tag(repository, version, revision, create=release is None)
+    if release is None:
+        run('gh', 'release', 'create', version, '--repo', repository, '--draft', '--verify-tag',
+            '--target', revision, '--title', 'LG Input Switch ' + version,
+            '--notes-file', str(ROOT / f'docs/releases/{version}.md'),
+            *(str(output / name) for name in sorted(expected)))
+    else:
+        missing = missing_draft_assets(release, revision, expected)
+        if missing:
+            run('gh', 'release', 'upload', version, '--repo', repository,
+                *(str(output / name) for name in missing))
+    if missing_draft_assets(find_release(repository, version), revision, expected):
+        raise ValueError('Draft is missing release assets')
+    ensure_release_tag(repository, version, revision)
+    run('gh', 'release', 'edit', version, '--repo', repository, '--draft=false',
+        *(('--prerelease', '--latest=false') if '-beta.' in version else ('--prerelease=false', '--latest')))
     print(run('gh', 'release', 'view', version, '--repo', repository, '--json', 'url'))
 
 

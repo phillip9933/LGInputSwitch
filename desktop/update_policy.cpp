@@ -13,6 +13,19 @@ bool ValidUpdateVersion(const QString &version) {
     for (const auto &part : parts) if (part.toUInt() > 65535) return false;
     return true;
 }
+namespace {
+bool InstalledVersion(const QString &version) {
+    const auto parts = version.split("-beta.");
+    return ValidUpdateVersion(parts.front()) && (parts.size() == 1 || (parts.size() == 2 &&
+        QRegularExpression("^[1-9][0-9]{0,4}$").match(parts.back()).hasMatch() && parts.back().toUInt() <= 65535));
+}
+}
+bool NewerStableUpdate(const QString &candidate, const QString &installed) {
+    if (!ValidUpdateVersion(candidate) || !InstalledVersion(installed)) return false;
+    const auto base = installed.section('-', 0, 0);
+    return QVersionNumber::fromString(candidate) > QVersionNumber::fromString(base) ||
+           (candidate == base && installed != base);
+}
 QString UpdateAssetName(const QString &version, bool windows) {
     return windows ? "LGInputSwitch-" + version + "-Windows-x64.exe"
                    : "lginputswitch-" + version + "-1-x86_64.pkg.tar.zst";
@@ -25,7 +38,7 @@ bool AllowedUpdateUrl(const QUrl &url) {
 }
 UpdateOffer SelectUpdate(const QByteArray &json, const QString &installed, bool windows, QString &error) {
     error.clear();
-    if (!ValidUpdateVersion(installed) || json.size() > 2 * 1024 * 1024) {
+    if (!InstalledVersion(installed) || json.size() > 2 * 1024 * 1024) {
         error = "Update metadata exceeds supported limits."; return {};
     }
     const auto doc = QJsonDocument::fromJson(json);
@@ -38,7 +51,7 @@ UpdateOffer SelectUpdate(const QByteArray &json, const QString &installed, bool 
         if (!ValidUpdateVersion(version) || release["draft"].toBool(true) || release["prerelease"].toBool(true)) continue;
         if (seen.contains(version)) { error = "GitHub returned duplicate release versions."; return {}; }
         seen.insert(version);
-        if (QVersionNumber::fromString(version) <= QVersionNumber::fromString(installed)) continue;
+        if (!NewerStableUpdate(version, installed)) continue;
         if (best.available() && QVersionNumber::fromString(version) <= QVersionNumber::fromString(best.version)) continue;
         const auto name = UpdateAssetName(version, windows);
         const auto prefix = repository + "/releases/download/" + version + "/";

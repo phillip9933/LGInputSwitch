@@ -15,6 +15,12 @@ int main(int argc, char **argv)
     if (app.arguments().contains("--hang")) { QThread::sleep(10); return 0; }
     if (app.arguments().contains("--fixture")) { std::cout << "fixture"; return 0; }
     if (app.arguments().contains("--large")) { std::cout << std::string(65537, 'x'); return 0; }
+    if (app.arguments().contains("--large-then-wait"))
+    {
+        std::cout << std::string(65537, 'x') << std::flush;
+        QThread::sleep(10);
+        return 0;
+    }
     if (app.arguments().contains("--warning")) {
         std::cerr << "Warning: synthetic diagnostic warning\n";
         std::cout << "(vcp(60(0f 11)))";
@@ -119,6 +125,8 @@ int main(int argc, char **argv)
     const auto process = RunDesktopProcess(app.applicationFilePath(), {"--fixture"}, 3000);
     Check(process.status == "finished" && process.exitCode == 0 && process.output == "fixture",
           "Bounded process output failed");
+    Check(RunDesktopProcess(app.applicationFilePath(), {"--large-then-wait"}, 3000).status ==
+              "output limit exceeded", "A running child exceeded the output budget without being stopped");
     Check(RunDesktopProcess(app.applicationFilePath(), {"--large"}, 3000).status == "output limit exceeded",
           "Oversized process output silently truncated");
     const auto warning = RunDesktopProcess(app.applicationFilePath(), {"--warning"}, 3000);

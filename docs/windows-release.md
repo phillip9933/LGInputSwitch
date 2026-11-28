@@ -1,10 +1,9 @@
 # Windows portable app
 
-Download `LGInputSwitch-1.3.4-Windows-x64.exe` from the
-[1.3.4 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/1.3.4),
+Download `LGInputSwitch-2.0.0-beta.1-Windows-x64.exe` from the
+[2.0.0-beta.1 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/2.0.0-beta.1),
 put it in a writable folder and run it. There is no installer, Qt DLL folder or
-separate Microsoft runtime setup. LG alternate switching uses an AMD-driven
-connection. Standard DDC/CI connections, including Windows dock discovery, are
+separate Microsoft runtime setup. LG alternate switching uses a compatible AMD or NVIDIA output. Intel outputs use standard DDC/CI. Standard DDC/CI connections, including Windows dock discovery, are
 also available; support for a particular monitor/dock still needs verification.
 LG's alternate command cannot be sent through the native Windows DDC/CI path.
 
@@ -25,7 +24,7 @@ are saved atomically in desktop-profiles.json; appearance preferences and update
 check preferences use the existing per-user Qt settings. No updater replaces
 settings files, changes monitor mappings or alters Windows Startup Apps policy.
 
-Starting with 1.3.2, **Preferences → Application updates** can check GitHub, show
+Starting with 1.3.2, **Settings → Application updates** in the beta (**Preferences** in 1.x) can check GitHub, show
 release notes, download a verified update, and install/restart when you choose.
 The app asks about unsaved changes and keeps the previous executable. See
 [update behavior, trust and recovery](updates.md). The first updater-capable
@@ -47,7 +46,7 @@ The executable embeds the project/dependency license texts, attribution, source
 links, checksums and rebuild instructions. Export them to a text file with:
 
 ```
-LGInputSwitch-1.3.4-Windows-x64.exe --licenses notices.txt
+LGInputSwitch-2.0.0-beta.1-Windows-x64.exe --licenses notices.txt
 ```
 
 Project code is AGPL-3.0-or-later; Qt uses LGPLv3 and bundled third-party terms

@@ -174,7 +174,9 @@ QString FormatDesktopDiagnostics(const DiagnosticSnapshot &snapshot, const QJson
                                         {"input_profile", monitor.inputProfile == Lg40U990AInputProfile
                                             ? QString(Lg40U990AInputProfile) : QString("unmatched")},
                                         {"automatic_inputs", monitor.autoInputs},
-                                        {"lg_alternate_transport_supported", monitor.config.transport != WindowsDdcTransport}});
+                                        {"lg_alternate_transport_supported", monitor.config.transport != WindowsDdcTransport ||
+                                            (monitor.hardware["adapter_kind"] == "nvidia" &&
+                                             monitor.hardware["nvidia_ddc"].toBool())}});
         }
         report["profile_monitors"] = monitors;
     }

@@ -38,3 +38,5 @@ For wallets and cloud clients, explicitly test relevant encryption, storage, bac
 Every issue records its goal/problem, scope and explicit exclusions, a **Done when** acceptance checklist, dependencies (or None), and verification results/links before closure. New reports may say verification is pending. Release trackers additionally name the target version, one owner, included issues, promotion-gate checklists, remaining blockers and build/release links.
 
 The **Roadmap** view contains only `type:release` items on a timeline, with Stage and estimated start/target dates. The **Work board** contains bugs, features, maintenance and docs grouped by Status. Keep statuses and stages current as work changes. Preserve report authors’ original details when adding triage structure, and disclose material AI assistance in implementation and verification summaries.
+
+For desktop UI changes, follow the [workspace design guide](docs/desktop-design-guide.md).

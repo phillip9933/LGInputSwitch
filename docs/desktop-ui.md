@@ -13,48 +13,26 @@ module; no separate legacy executable is built or published.
 The Windows/Linux desktop app supports monitor profiles. The standalone Linux
 CLI retains its single-target behavior.
 
-The top navigation contains **Profiles**, **Preferences**, **Advanced** and
-**Diagnostics**. App-wide settings are separate pages; monitor controls appear
-only on Profiles. Pages scroll at smaller sizes while status and Save settings
-stay outside the scrolling content. The default window is 1000×740 and supports
-620×460; large action tables also have their own scrolling.
+The Workspace sidebar contains **Input Profiles**, **Monitors**, and **Settings**.
+The pages scroll in smaller windows while status and **Save changes** stay visible.
 
-On **Profiles**, named profile tabs sit above a monitor-status summary and a
-read-only switching table. **Manage monitors** reveals connection details, the
-+ Monitor button and Refresh; the section opens automatically when a monitor
-newly needs a connection. Disabled actions are hidden in this normal view.
-Use **Edit actions** to show enabled checkboxes, input selectors, shortcut
-recorders, and action-management controls. **Done editing** returns to switching
-view and keeps the draft; **Save settings** commits the entire workspace. Tab/page
-changes retain drafts. Unsaved changes block switching, including native keys
-and tray actions, until saved.
+1. Open **Input Profiles** and choose a profile tab. The **+** tab creates a
+   profile with independent actions and shortcuts. The **…** menu renames or
+   removes the selected profile.
+2. The pencil beside **Assigned monitors** lets you check the saved monitors to
+   include. Choose **Save monitors** or **Cancel**.
+3. Choose **Switch** beside an action to send its mappings. The pencil beside
+   **Actions** opens names, enabled states, per-monitor inputs and shortcuts in
+   place. Drag a row by its left grip or use Alt+Up or Alt+Down. Use its trash
+   button to delete it. **Cancel** restores the draft from before editing.
+4. **Save actions** applies this profile directly. **Cycle inputs** follows the
+   saved order. **Previous input** returns to the previous accepted action.
 
-1. Use **Connect…** for a monitor needing a connection. Connected rows show status
-   and their detected route as text. A row’s **… → Reconnect…** opens an explicit
-   binding dialog; connections assigned to another saved monitor are excluded.
-   The dialog can refresh discovery. This updates the saved monitor in all its
-   profiles; to use another saved monitor in this profile, use **+ Monitor**.
-2. Expand **Manage monitors**, then use **… → Edit monitor & inputs…** to name a monitor and review its method,
-   input names/codes and source address. These mappings are shared by every
-   profile using that saved monitor.
-3. Use **+ Profile** for an independent action list without copied shortcuts.
-   The adjacent profile-options **…** menu contains Rename/remove. **+ Monitor**
-   attaches another saved or newly detected monitor and opens action editing.
-4. In **Edit actions**, name actions such as **Linux PC** and **Windows PC**.
-   Choose an input for every assigned monitor in every action. Port-named actions
-   can match the same detected input name automatically; named PC scenes still
-   need their per-monitor mapping because the app cannot identify connected PCs. **+ Action** adds rows; select a row and
-   use **Action options** to move or remove it. Cycle/previous shortcut fields
-   are also shown here. Native shortcut changes from Plasma update the read-only
-   shortcut display without discarding drafts.
-5. Save, then use a row’s **Switch**, **Cycle inputs**, **Previous input**, a
-   profile’s tray submenu or its shortcut. A failed group reveals **Retry failed
-   monitors** and per-monitor results. The selected GUI tab never changes which
-   profile a shortcut controls.
+The [workspace design guide](desktop-design-guide.md) describes the shared layout,
+palette, interaction patterns and visual checks for both desktop platforms.
 
-**Diagnostics** has its own **Report for** profile selector, linked to the profile
-tabs. It makes the report target explicit while keeping the diagnostic tools on
-an app-level page.
+Under **Settings → Diagnostics**, **Report for** selects the profile to check.
+Changing the report target keeps the selected switching profile and its draft.
 
 For example, a Linux PC action can send DisplayPort on the main monitor and
 HDMI on the side monitor. Commands run on the serialized background worker, so
@@ -83,18 +61,37 @@ session; a changed route/model/fingerprint requires selecting it again. Reconnec
 never silently substitutes another display. Identity hashes and raw serial/EDID
 are not exported in support reports.
 
-The monitor library is available from **Advanced → Manage saved monitors**. Edit
-there or beside an assigned monitor to update its shared mapping. Inputs used
-by any action cannot be deleted until those actions are remapped. Removing a
-monitor from one profile keeps the library definition; only unused definitions
-can be deleted. At least one profile, monitor per profile and action must remain.
+Choose a monitor tab in **Monitors** to switch its inputs or adjust brightness.
+The **+** tab adds a connected display. Inputs are read automatically during setup
+and refresh. **Advanced → Detect inputs** repeats that read for the selected monitor.
+The pencil beside **Inputs** opens the inline editor. Check the inputs to show in the direct switchers. **Add input** selects a new row for its name and monitor code. To remove an input, select its row and choose **Remove input**. Either operation selects manual mode so detection preserves your custom list. **Save inputs** applies the edits. **Cancel** restores the original list and detection mode.
+**Connect…** appears when a saved display needs a connection. Connected displays
+can be rebound through **Connection → Choose another connection…**.
+Adding a display keeps it available for assignment to any input profile. Removing a mapped input asks for confirmation and disables the affected actions on save. Select a new mapping and re-enable those actions in **Input Profiles**. The inspector offers deletion for unused monitors only. At least one profile, monitor per profile and action must remain.
 Profiles with no enabled actions can be saved for later review; switching is
 unavailable until an action has a complete mapping and is enabled. Configuration limits are 16 saved monitors, 32 profiles and 64
 actions/inputs per profile/monitor.
 
-Appearance (Follow system/Light/Dark), notifications, startup and debounce remain
-app-wide. Advanced can reveal input codes beside the input names. Closing hides
+**Follow system** uses the palette Qt receives from Windows or the Linux desktop,
+with the app icon’s blue as the default accent. Enable **Use system accent color**
+under **Settings → Appearance and startup** to use your desktop’s accent. Light
+and Dark can also be selected manually.
+Notifications, startup, shortcut debounce and input-code visibility live under
+**Settings**. Closing hides
 to the tray when available; without a tray it quits after the unsaved-edits prompt.
+
+Double-click the tray icon to show or focus the workspace. Left-click once to open the quick panel beside it. On Plasma Wayland,
+the compositor places the panel at the clicked icon. Each saved monitor has its own
+brightness slider and enabled input buttons. **Switch monitors together** appears
+when a saved profile has enabled actions spanning two or more monitors.
+Right-click the tray icon for the menu, including **Quit**.
+
+Brightness uses standard DDC/CI on supported monitor connections and takes effect
+when you release the slider or adjust it with the keyboard. The app reads back
+the result. On Windows it uses the system monitor API, and on Linux it uses
+`ddcutil`. A monitor that does not report a brightness range leaves the slider
+disabled. The monitor settings page can read brightness again after a cable or
+picture-mode change.
 
 Since version 1.3.1, **Launch when I sign in** starts directly in the tray
 on Windows as well as Linux. No separate minimized-start setting is needed.
@@ -106,7 +103,7 @@ to update the existing sign-in command. Shortcuts register while the window is h
 ### Standard switching and other monitor brands
 
 Each saved monitor has its own **Switching method**, selected when adding it or
-in **Edit monitor & inputs**. **Standard DDC/CI (0x60)** supports Dell and other
+in **Inputs → Advanced**. **Standard DDC/CI (0x60)** supports Dell and other
 monitors that implement standard Input Source writes. It uses the standard 0x51
 source. **LG alternate (0xF4)** retains the existing configurable source address,
 normally 0x50. Migrated setups keep the LG method; new monitor definitions default
@@ -154,10 +151,9 @@ are not used as evidence of the hardware model, and only the allowlisted model
 profile identifier is added to diagnostics; raw model/EDID/serial text stays private.
 Manual input mode remains unchanged. Use **Refresh**, then **Save settings** to
 apply automatic setup to an existing monitor. If the monitor reports a generic
-model name, add a **Thunderbolt** input with `0xD2` manually in **Edit monitor &
-inputs**. Other Thunderbolt models still require their own confirmed mappings.
+model name, add a **Thunderbolt** input with `0xD2` manually in **Inputs → Advanced**. Other Thunderbolt models still require their own confirmed mappings.
 
-Changes are drafts until **Save settings**. In **Edit monitor & inputs**, uncheck
+In the inline input editor, uncheck
 **Read and set up this monitor’s inputs automatically** for a custom mapping.
 Read advertised inputs can refresh an automatic list or append to a manual list;
 method presets remain an explicit manual option.
@@ -181,15 +177,31 @@ standard and LG commands. Protocol background: [ddcutil Input Source example](ht
 
 Version 1.3.4 adds native Windows monitor discovery for monitors behind
 DisplayLink docks and other graphics devices that AMD's interface cannot address.
-A uniquely matched AMD connection retains AMD raw access. Other connections are
-labeled **Standard DDC/CI** and use Windows' monitor API for explicit standard
+A uniquely matched AMD connection retains AMD raw access. Supported NVIDIA
+connections appear with an **NVIDIA** label and can use **LG alternate (0xF4)** via
+the installed NVIDIA driver. The app requires a uniquely mapped NVIDIA output.
+Availability and switching should be verified on the actual display and cable.
+Intel PCI adapters are identified explicitly as **Intel · Standard DDC/CI**.
+Their standard input switching, brightness and capability reports use the native
+Windows monitor API. Diagnostics retain the Intel adapter category. Linux uses
+the existing ddcutil backend for Intel outputs.
+
+Intel LG alternate-command support is still pending. Intel's
+[IGCL I²C API](https://intel.github.io/drivers.gpu.control-library/Control/api.html#ctli2caccess)
+documents administrator privileges for writes. Before adding that backend, verify
+the custom source-address packet behavior on HDMI and DisplayPort, match IGCL
+outputs to Windows adapter/display identifiers, and isolate any required
+privileged operation from the tray app. Current Intel routes reject LG alternate
+commands with an explicit message. Hardware testing remains required.
+
+Other connections are labeled **Standard DDC/CI** and use Windows' monitor API for explicit standard
 `0x60` input writes. The native path does not require an AMD GPU or an added
 runtime library. Actual monitor/driver/dock compatibility needs tester feedback.
 
 This is not a raw-I2C transport: Windows' documented
 [SetVCPFeature API](https://learn.microsoft.com/en-us/windows/win32/api/lowlevelmonitorconfigurationapi/nf-lowlevelmonitorconfigurationapi-setvcpfeature)
 has no custom source-address argument. LG `0xF4` alternate switching is rejected
-on these native connections with an explanatory message; no different command or
+on standard-only connections with an explanatory message; no different command or
 source is silently substituted. Some LG monitors ignore standard input writes,
 even when they advertise `0x60`. Issue #5's LG-through-DisplayLink setup therefore
 remains unconfirmed and may require a direct GPU connection for LG alternate
@@ -263,7 +275,7 @@ mode never registers keys, discovers monitors, writes settings or sends commands
 
 ## Built-in diagnostics
 
-Open **Diagnostics → Create report** after a failed switch, review the report,
+Open **Settings → Diagnostics → Create report** after a failed switch, review the report,
 then use **Copy report** or **Save report** to attach it to a support request.
 There is no need to save unfinished settings before generating a report: the
 report identifies unsaved edits, and records the last command separately with
@@ -361,8 +373,9 @@ make
 
 ## Application updates
 
-Preferences includes automatic/manual checks, download progress/cancellation,
-release notes, Later and explicit installation/restart. See [updates](updates.md)
+Settings includes automatic/manual checks, download progress/cancellation,
+release notes, Later, automatic replacement on Windows and verified package export
+on Linux. See [updates](updates.md)
 for verification, platform behavior and recovery. The existing monitor controls,
 profiles, shortcuts and system/light/dark themes are retained.
 
@@ -374,7 +387,7 @@ LGInputSwitchDesktop --preview --screenshot-dir previews
 
 Preview mode never loads/saves user config, registers shortcuts, discovers hardware
 or sends monitor commands. It renders synthetic monitor data in both palettes,
-all four tabs and tray menus. Do not interpret the synthetic monitor as a support
+all three pages, the Diagnostics section, and the tray quick panel. Do not interpret the synthetic monitors as a support
 claim. Qt offscreen mode (`QT_QPA_PLATFORM=offscreen`) can render it in CI.
 
 Local Linux checks cover both palettes, visible rows, preview isolation, fake

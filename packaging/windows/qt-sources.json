@@ -1,10 +1,10 @@
 {
-  "version": "6.8.3",
+  "version": "6.12.0",
   "sources": [
     {
-      "name": "qtbase-everywhere-src-6.8.3.tar.xz",
-      "sha256": "56001b905601bb9023d399f3ba780d7fa940f3e4861e496a7c490331f49e0b80",
-      "url": "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.tar.xz"
+      "name": "qtbase-everywhere-src-6.12.0.tar.xz",
+      "sha256": "a951bd163c7b80fc6b8c88d7668fb56abf91c152373e13c10666763238131307",
+      "url": "https://download.qt.io/archive/qt/6.12/6.12.0/submodules/qtbase-everywhere-src-6.12.0.tar.xz"
     }
   ],
   "configure_args": [

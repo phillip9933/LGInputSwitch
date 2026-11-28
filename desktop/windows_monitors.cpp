@@ -3,6 +3,20 @@
 #include "diagnostics.h"
 #include "../core/input_value.h"
 
+QString NativeWindowsAdapterKind(const QString &deviceId, const QString &description)
+{
+    const auto id = deviceId.toUpper();
+    if (description.contains("DisplayLink", Qt::CaseInsensitive) || id.contains("VID_17E9"))
+        return "displaylink";
+    if (id.startsWith("PCI\\VEN_1002&"))
+        return "amd";
+    if (id.startsWith("PCI\\VEN_10DE&"))
+        return "nvidia";
+    if (id.startsWith("PCI\\VEN_8086&"))
+        return "intel";
+    return "other";
+}
+
 int NativeWindowsDisplayNumber(const QString &name)
 {
     const QString prefix = "\\\\.\\DISPLAY";
@@ -52,8 +66,8 @@ Discovery MergeWindowsDiscovery(Discovery amd, const Discovery &native)
         for (const auto &candidate : native.monitors)
             if (candidate.identity == monitor.identity)
                 ++nativeMatches;
-        // Keep AMD raw access for uniquely matched AMD monitors. Unmatched
-        // DisplayLink/Intel/NVIDIA routes use Windows standard DDC/CI instead.
+        // Keep AMD raw access for uniquely matched AMD monitors and retain
+        // native routes for the other adapters, including NVIDIA.
         if (amdMatches == 1 && nativeMatches == 1 && monitor.hardware["adapter_kind"] == "amd")
             continue;
         amd.monitors.push_back(monitor);
@@ -64,18 +78,15 @@ Discovery MergeWindowsDiscovery(Discovery amd, const Discovery &native)
     return amd;
 }
 lg::SwitchResult DispatchNativeWindowsInput(const DesktopConfig &config, const QString &code,
-                                          const Discovery &live, const NativeMonitorWriter &write)
+                                          const Discovery &live, const NativeMonitorWriter &write,
+                                          const NvidiaMonitorWriter &writeNvidia)
 {
-    if (config.method == "lg")
-        return {lg::SwitchStatus::InvalidArgument, 50,
-                "This connection uses Windows DDC/CI, which cannot send LG alternate commands with a "
-                "custom source address. Use a direct AMD connection for LG alternate switching. "
-                "Standard DDC/CI can be selected and tested if this monitor supports it."};
-    unsigned int value;
-    if (config.transport != WindowsDdcTransport || config.method != "standard" ||
+    unsigned int value = 0;
+    if (config.transport != WindowsDdcTransport ||
+        (config.method != "standard" && config.method != "lg") ||
         NativeWindowsDisplayNumber(config.nativeDisplay) < 0 ||
         !QRegularExpression("^[0-9a-f]{64}$").match(config.targetIdentity).hasMatch() ||
-        !ParseInputValue(code.toStdString(), 0xffff, value) || !write)
+        !ParseInputValue(code.toStdString(), 0xffff, value))
         return {lg::SwitchStatus::InvalidArgument, 87, "Invalid Windows monitor selection or input."};
     QVector<DesktopMonitor> matches;
     for (const auto &monitor : live.monitors)
@@ -85,7 +96,25 @@ lg::SwitchResult DispatchNativeWindowsInput(const DesktopConfig &config, const Q
     if (matches.size() != 1)
         return {lg::SwitchStatus::TransportFailure, 1167,
                 "Windows monitor disconnected, changed or ambiguous. Refresh and reconnect it."};
-    return write(matches.front(), value);
+    const auto &target = matches.front();
+    if (config.method == "lg")
+    {
+        unsigned int address = 0;
+        if (!ParseInputValue(config.source.toStdString(), 0xff, address))
+            return {lg::SwitchStatus::InvalidArgument, 87, "Invalid LG source address."};
+        if (target.hardware["adapter_kind"] == "intel")
+            return {lg::SwitchStatus::InvalidArgument, 50,
+                    "Intel supports standard DDC/CI on this path. LG alternate commands are not yet "
+                    "implemented for Intel. Select Standard only if your monitor supports it."};
+        if (target.hardware["adapter_kind"] != "nvidia" || !writeNvidia)
+            return {lg::SwitchStatus::InvalidArgument, 50,
+                    "This connection cannot send LG alternate commands with a custom source address. "
+                    "Use a supported AMD or NVIDIA output."};
+        return writeNvidia(target, {address, 0xf4u, value});
+    }
+    if (!write)
+        return {lg::SwitchStatus::InvalidArgument, 87, "Windows DDC/CI writer unavailable."};
+    return write(target, value);
 }
 
 #ifdef Q_OS_WIN
@@ -93,7 +122,10 @@ lg::SwitchResult DispatchNativeWindowsInput(const DesktopConfig &config, const Q
 #include <lowlevelmonitorconfigurationapi.h>
 #include <physicalmonitorenumerationapi.h>
 #include <setupapi.h>
+#include <algorithm>
+#include <memory>
 #include <vector>
+#include "nvapi_ddc.h"
 
 namespace
 {
@@ -175,11 +207,8 @@ QString AdapterKind(const QString &display)
             break;
         if (QString::fromWCharArray(adapter.DeviceName) != display)
             continue;
-        const auto id = QString::fromWCharArray(adapter.DeviceID).toUpper();
-        const auto name = QString::fromWCharArray(adapter.DeviceString);
-        if (name.contains("DisplayLink", Qt::CaseInsensitive) || id.contains("VID_17E9"))
-            return "displaylink";
-        return id.startsWith("PCI\\VEN_1002&") ? "amd" : "other";
+        return NativeWindowsAdapterKind(QString::fromWCharArray(adapter.DeviceID),
+                                        QString::fromWCharArray(adapter.DeviceString));
     }
     return "other";
 }
@@ -216,6 +245,8 @@ BOOL CALLBACK ReadDisplay(HMONITOR handle, HDC, LPRECT, LPARAM raw)
     target.nativeDisplay = name;
     target.hardware = MonitorEdidHardware(edid);
     target.hardware["adapter_kind"] = AdapterKind(name);
+    if (target.hardware["adapter_kind"] == "intel")
+        target.label.replace(" · Standard DDC/CI", " · Intel · Standard DDC/CI");
     target.inputProfile = target.hardware["input_profile"].toString();
     inventory.records.push_back({target, handle});
     return TRUE;
@@ -258,12 +289,37 @@ const NativeRecord *Selected(const Inventory &inventory, const QString &display,
     return selected;
 }
 } // namespace
+
+static NvidiaDdc::Target ResolveNvidiaOutput(const NvidiaDdc &driver, const Inventory &inventory,
+                                             const NativeRecord &record)
+{
+    if (record.target.hardware["adapter_kind"] != "nvidia" ||
+        !record.target.hardware["edid_valid"].toBool())
+        return {};
+    const auto target = driver.resolve(record.target.nativeDisplay.toLatin1().constData());
+    if (!target)
+        return {};
+    for (const auto &other : inventory.records)
+        if (&other != &record && driver.resolve(other.target.nativeDisplay.toLatin1().constData()) == target)
+            return {};
+    return target;
+}
+
 QJsonObject ProbeNativeWindowsDiscovery()
 {
+    const auto inventory = ReadInventory();
+    const bool hasNvidia = std::any_of(inventory.records.cbegin(), inventory.records.cend(),
+        [](const auto &record) { return record.target.hardware["adapter_kind"] == "nvidia"; });
+    const auto nvidia = hasNvidia ? std::make_unique<NvidiaDdc>() : nullptr;
     QJsonArray monitors;
-    for (const auto &record : ReadInventory().records)
+    for (const auto &record : inventory.records)
     {
-        const auto &target = record.target;
+        auto target = record.target;
+        if (nvidia && ResolveNvidiaOutput(*nvidia, inventory, record))
+        {
+            target.hardware["nvidia_ddc"] = true;
+            target.label.replace(" · Standard DDC/CI", " · NVIDIA");
+        }
         monitors.append(QJsonObject{{"label", target.label}, {"identity", target.identity},
                                     {"windows_display", target.nativeDisplay}, {"hardware", target.hardware}});
     }
@@ -309,11 +365,13 @@ QJsonObject ProbeNativeWindowsCapabilities(const QString &display, const QString
         result["input_profile"] = hardware["input_profile"];
     return result;
 }
-QJsonObject ProbeNativeWindowsSwitch(const QString &display, const QString &identity, const QString &code)
+QJsonObject ProbeNativeWindowsSwitch(const QString &display, const QString &identity, const QString &code,
+                                     const QString &source)
 {
     DesktopConfig config;
     config.transport = WindowsDdcTransport;
-    config.method = "standard";
+    config.method = source.isEmpty() ? "standard" : "lg";
+    config.source = source;
     config.nativeDisplay = display;
     config.targetIdentity = identity;
     const auto inventory = ReadInventory();
@@ -329,7 +387,51 @@ QJsonObject ProbeNativeWindowsSwitch(const QString &display, const QString &iden
             if (!SetVCPFeature(physical.value.hPhysicalMonitor, 0x60, value))
                 return {lg::SwitchStatus::TransportFailure, int(GetLastError()), "Windows DDC/CI input command failed."};
             return {lg::SwitchStatus::CommandSent, 0, "Windows DDC/CI command sent; physical switch unverified."};
+        },
+        [&](const DesktopMonitor &target, const lg::InputCommand &command) -> lg::SwitchResult {
+            const auto *record = Selected(inventory, target.nativeDisplay, target.identity);
+            const NvidiaDdc nvidia;
+            const auto output = record ? ResolveNvidiaOutput(nvidia, inventory, *record) : NvidiaDdc::Target{};
+            if (!output)
+                return {lg::SwitchStatus::TransportFailure, 50, "NVIDIA display output is unavailable or ambiguous."};
+            return nvidia.send(output, command);
         });
     return {{"sent", result.sent()}, {"native_code", result.nativeCode}, {"detail", QString::fromStdString(result.detail)}};
+}
+
+QJsonObject ProbeNativeWindowsBrightness(const QString &display, const QString &identity, int percent)
+{
+    const auto unavailable = [](const QString &text) {
+        return QJsonObject{{"percent", -1}, {"status", text}};
+    };
+    if (percent < -1 || percent > 100 || identity.isEmpty())
+        return unavailable("Invalid brightness target.");
+    const auto inventory = ReadInventory();
+    const auto *record = Selected(inventory, display, identity);
+    PhysicalMonitor physical;
+    if (!record || !physical.acquire(record->handle))
+        return unavailable("Windows monitor is unavailable or ambiguous.");
+    DWORD current = 0, maximum = 0;
+    const auto read = [&] {
+        return GetVCPFeatureAndVCPFeatureReply(physical.value.hPhysicalMonitor, 0x10, nullptr,
+                                              &current, &maximum) &&
+               maximum > 0 && maximum <= 65535 && current <= maximum;
+    };
+    if (!read())
+        return unavailable("This monitor did not report brightness.");
+    QString status;
+    if (percent >= 0)
+    {
+        const DWORD requested = (maximum * percent + 50) / 100;
+        if (requested != current)
+        {
+            const bool sent = SetVCPFeature(physical.value.hPhysicalMonitor, 0x10, requested);
+            if (!read())
+                return unavailable("Could not confirm brightness after the request.");
+            if (!sent || current != requested)
+                status = "The monitor did not confirm the requested brightness.";
+        }
+    }
+    return {{"percent", int((current * 100 + maximum / 2) / maximum)}, {"status", status}};
 }
 #endif

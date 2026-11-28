@@ -69,7 +69,9 @@ QJsonObject SafeMonitorHardware(const QJsonObject &hardware)
     if (QStringList{"edid-product", "edid-model"}.contains(match))
         result["profile_match"] = match;
     const auto adapter = hardware["adapter_kind"].toString();
-    if (QStringList{"amd", "displaylink", "other"}.contains(adapter))
+    if (QStringList{"amd", "nvidia", "intel", "displaylink", "other"}.contains(adapter))
         result["adapter_kind"] = adapter;
+    if (adapter == "nvidia" && hardware["nvidia_ddc"].toBool())
+        result["nvidia_ddc"] = true;
     return result;
 }

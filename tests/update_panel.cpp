@@ -116,7 +116,17 @@ void TestUpdatePanel() {
     network.responses = {{binary, QNetworkReply::NoError, name}};
     panel.findChild<QPushButton *>("downloadUpdate")->click(); finish(panel);
     auto *install = panel.findChild<QPushButton *>("installUpdate");
-    check(!install->isHidden() && status->text().contains("ready to install"), "Verified update not retained for installation");
+#ifdef Q_OS_WIN
+    if (!WindowsUpdateAllowed()) {
+        check(!install->isHidden() && !install->isEnabled() &&
+                  status->text() == WindowsUpdatePrivilegeMessage,
+              "Elevated updater offered self-installation");
+        QCoreApplication::setApplicationVersion(originalVersion);
+        return;
+    }
+#endif
+    check(!install->isHidden() && status->text().contains("1.3.3 is verified"),
+          "Verified update not retained for installation or export");
     // Force the daily check due, then manually check too. Neither may remove
     // the ready binary or replace its matching release/checksum metadata.
     settings.setValue("updates/lastCheck", 1);
@@ -124,5 +134,21 @@ void TestUpdatePanel() {
     panel.check(false); panel.check(true);
     check(network.requests == requests && !install->isHidden() && install->isEnabled() &&
               status->text().contains("1.3.3 is verified"), "A check discarded a ready update");
+#ifndef Q_OS_WIN
+    check(install->text() == "Save package…" && status->text().contains("Save the package"),
+          "Linux updater did not retain the package export action and instructions");
+    const auto exported = temporary.filePath(name);
+    QTimer::singleShot(0, &panel, [&] {
+        auto *dialog = qobject_cast<QFileDialog *>(QApplication::activeModalWidget());
+        check(dialog != nullptr, "Linux updater did not open the package export dialog");
+        dialog->selectFile(exported);
+        QMetaObject::invokeMethod(dialog, "accept");
+    });
+    install->click();
+    QFile package(exported);
+    check(package.open(QIODevice::ReadOnly) && package.readAll() == binary &&
+              status->text().contains("Verified package saved"),
+          "Linux updater did not export the verified bytes");
+#endif
     QCoreApplication::setApplicationVersion(originalVersion);
 }

@@ -11,7 +11,7 @@ import urllib.request
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '1.3.4'
+VERSION = '2.0.0-beta.1'
 QT = json.loads((ROOT / 'packaging/windows/qt-sources.json').read_text())
 
 
@@ -24,8 +24,7 @@ def dependencies(output):
     for entry in QT['sources']:
         path = output / entry['name']
         if not path.exists():
-            request = urllib.request.Request(entry.get('url',
-                'https://download.qt.io/archive/qt/6.8/6.8.3/submodules/' + entry['name']),
+            request = urllib.request.Request(entry['url'],
                 headers={'User-Agent': 'LGInputSwitch-release/' + VERSION})
             with urllib.request.urlopen(request, timeout=180) as source, path.open('wb') as target:
                 shutil.copyfileobj(source, target)

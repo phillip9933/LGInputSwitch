@@ -8,6 +8,12 @@ This project incorporates or was inspired by the following:
 - Preserve the full notices in these headers and `licenses/AMD-ADL-MIT.txt`.
 - AMD driver runtime DLLs are loaded from the installed driver and are not bundled.
 
+## NVIDIA NVAPI SDK
+- The NVIDIA DDC adapter uses the public SDK's I²C structure layout and interface IDs.
+- Source: https://github.com/NVIDIA/nvapi
+- License: MIT. Preserve the notice in `licenses/NVIDIA-NVAPI-MIT.txt`.
+- The DLL is loaded from the installed NVIDIA driver. Windows releases do not include the driver DLL or SDK libraries.
+
 ## nlohmann/json (standalone Linux CLI)
 - The standalone Linux CLI uses this parser; the desktop app and its settings importer use Qt JSON.
 - License: MIT (bundled version 3.12.0); full text: `licenses/nlohmann-json-MIT.txt`.

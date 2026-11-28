@@ -41,6 +41,7 @@ QString NewDesktopId();
 QVector<DesktopInput> DefaultMonitorInputs(const QString &method, const QString &inputProfile = {});
 DesktopWorkspace MigrateDesktopConfig(const DesktopConfig &legacy);
 QJsonObject WorkspaceJson(const DesktopWorkspace &workspace);
+bool SameProfileCommands(const DesktopWorkspace &before, const DesktopWorkspace &after, const QString &id);
 bool ParseWorkspace(const QJsonObject &json, DesktopWorkspace &workspace, QString &error);
 bool ValidateWorkspace(const DesktopWorkspace &workspace, QString &error);
 enum class WorkspaceLoadStatus { Loaded, Migrated, Blocked };
@@ -65,6 +66,7 @@ struct MonitorResolution
     DesktopMonitor target;
     QString reason;
 };
+MonitorResolution ResolveMonitorConnection(const DesktopMonitor &expected, const Discovery &discovery);
 MonitorResolution ResolveSavedMonitor(const SavedMonitor &monitor, const Discovery &discovery,
                                       const QMap<QString, DesktopMonitor> &confirmed = {});
 

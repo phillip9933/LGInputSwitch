@@ -1,7 +1,7 @@
 # Application updates
 
 The desktop app checks public GitHub releases once a day while running. In
-**Preferences → Application updates**, automatic checks can be disabled and a
+**Settings → Application updates**, automatic checks can be disabled and a
 manual check can be run at any time. A manual check bypasses the daily interval
 and the one-version Later dismissal. Updates never download or install silently.
 Preview mode and automated GUI fixtures do not make network requests.
@@ -14,11 +14,12 @@ it again.
 A new compatible release produces a tray notification when notifications are
 enabled. Choose **Download update** to see progress, or **Later** to dismiss that
 version. Cancelling, network timeouts and GitHub rate limits leave the installed
-app unchanged. After verification, **Install and restart** asks about unsaved
-settings before installing. Release notes open the exact numbered GitHub release.
+app unchanged. After verification, Windows offers **Install and restart** and asks about
+unsaved settings. On Linux, choose **Save package…**. Release notes open the exact numbered GitHub release.
 
 ## Verification and trust
 
+Beta builds can upgrade to the stable release of the same base version. New betas are manual downloads.
 Only strict, newer numeric releases from `phillip9933/LGInputSwitch` are selected;
 drafts, prereleases, downgrades and ZIP-only historical Windows releases are not
 automatic-install candidates. The download must have the exact platform/version
@@ -55,14 +56,11 @@ settings to a user-writable folder or update manually.
 
 ## Linux package installation
 
-Automatic installation is available for the native Arch/CachyOS package installed
-under `/usr/bin`. The app checks package ownership, package name/version and the
-verified download, then invokes the system pacman through polkit. The user approves
-its normal OS authorization dialog. Cancellation or dependency failures are shown
-in the app; no broad system upgrade or I2C permission change is performed. Profiles
-and settings remain in the user’s configuration directory. The app restarts only
-after package installation succeeds and its previous instance exits.
+**Save package…** exports the GitHub-verified Arch/CachyOS package to a location
+you choose. The app checks the exact bytes it exports. Install the saved package
+with your system package manager and restart LG Input Switch. For installations
+managed by a distribution repository, update through that repository as usual.
 
-Source/manual installations and other distributions use the release page and their
-normal installation process. Linux rollback uses pacman’s normal package cache or
-a previous package; the updater does not replace package-owned binaries directly.
+You can verify a saved download again using the release’s SHA256SUMS before
+installing it. Linux rollback uses pacman’s normal package cache or a previous
+package.

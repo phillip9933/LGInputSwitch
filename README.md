@@ -17,6 +17,10 @@ monitors, including Dell.
 - Automatic input detection, custom mappings and per-monitor results with retry.
 - System/light/dark themes, optional startup and built-in diagnostics.
 
+## 2.0 beta
+
+The [2.0.0 Beta 1 release](https://github.com/phillip9933/LGInputSwitch/releases/tag/2.0.0-beta.1) adds NVIDIA LG alternate switching on supported Windows outputs, Intel standard DDC/CI routing, per-monitor brightness, and a redesigned workspace and tray. Hardware reports and usability feedback are welcome. The buttons above download stable 1.3.4.
+
 ## Download and setup
 
 Get the [latest release](https://github.com/phillip9933/LGInputSwitch/releases/latest).
@@ -33,15 +37,14 @@ choose an input for every monitor. See [profiles and shortcuts](docs/desktop-ui.
 Back up your settings and quit the app before upgrading.
 
 Monitor support varies, and advertised inputs can be incomplete. Linux testing
-has focused on CachyOS/KDE; physical Windows testing is limited. Intel/NVIDIA
-raw-I²C Windows backends and macOS remain future work. Use known input codes for your
+has focused on CachyOS/KDE; physical Windows testing is limited. The beta adds the NVIDIA and Intel paths described above. Intel LG alternate switching and macOS remain future work. Use known input codes for your
 monitor; commands are sent directly to the display.
 
 ## Help and development
 
-For troubleshooting, open **Diagnostics → Create report**, review it, then copy
+For troubleshooting in the beta, open **Settings → Diagnostics → Create report**, review it, then copy
 or save it with your [issue](https://github.com/phillip9933/LGInputSwitch/issues).
-Reports stay local until you share them. Check for app updates in **Preferences → Application updates**.
+Reports stay local until you share them. Check for updates in **Settings → Application updates** in the beta or **Preferences → Application updates** in 1.3.4.
 
 [Build the desktop app](docs/desktop-ui.md) · [Linux CLI](docs/linux-cli.md) ·
 [Contributing](CONTRIBUTING.md) · [Release notes](docs/releases/1.3.4.md)

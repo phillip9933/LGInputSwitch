@@ -6,6 +6,10 @@ constexpr bool windows = true;
 #else
 constexpr bool windows = false;
 #endif
+QString verifiedUpdateMessage(const QString &version) {
+    return windows ? "Version " + version + " is verified and ready to install."
+                   : "Version " + version + " is verified. Save the package to install it.";
+}
 }
 UpdatePanel::UpdatePanel(bool preview, QWidget *parent, QNetworkAccessManager *transport, QSettings *settings)
     : QWidget(parent), transport_(transport ? transport : &network_),
@@ -19,14 +23,14 @@ UpdatePanel::UpdatePanel(bool preview, QWidget *parent, QNetworkAccessManager *t
     automatic_->setObjectName("automaticUpdates");
     automatic_->setChecked(preview || settings_->value("updates/automatic", true).toBool());
     layout->addWidget(automatic_);
-    auto *hint = new QLabel("Checks once a day. Downloads and installation start only when you choose them.");
+    auto *hint = new QLabel("Checks once a day. Updates download when you choose them.");
     hint->setWordWrap(true); layout->addWidget(hint);
     status_ = new QLabel("Version " + installed_); status_->setTextFormat(Qt::PlainText); status_->setWordWrap(true);
     status_->setObjectName("updateStatus"); layout->addWidget(status_);
     progress_ = new QProgressBar; progress_->setRange(0, 100); progress_->hide(); layout->addWidget(progress_);
     auto *buttons = new QGridLayout;
     check_ = new QPushButton("Check for updates"); download_ = new QPushButton("Download update");
-    install_ = new QPushButton("Install and restart"); later_ = new QPushButton("Later");
+    install_ = new QPushButton(windows ? "Install and restart" : "Save package…"); later_ = new QPushButton("Later");
     cancel_ = new QPushButton("Cancel download"); notes_ = new QPushButton("Release notes");
     check_->setObjectName("checkUpdates"); download_->setObjectName("downloadUpdate"); install_->setObjectName("installUpdate");
     buttons->addWidget(check_, 0, 0); buttons->addWidget(download_, 0, 1); buttons->addWidget(install_, 0, 2);
@@ -69,6 +73,14 @@ void UpdatePanel::state(const QString &message, bool working) {
     check_->setEnabled(!working); automatic_->setEnabled(!working);
     download_->setVisible(offer_.available() && downloaded_.isEmpty()); download_->setEnabled(!working);
     install_->setVisible(!downloaded_.isEmpty()); install_->setEnabled(!working);
+#ifdef Q_OS_WIN
+    if (!downloaded_.isEmpty() && !WindowsUpdateAllowed()) {
+        install_->setEnabled(false);
+        install_->setToolTip(WindowsUpdatePrivilegeMessage);
+        status_->setText(WindowsUpdatePrivilegeMessage);
+        status_->setAccessibleName(status_->text());
+    }
+#endif
     later_->setVisible(offer_.available()); later_->setEnabled(!working);
     notes_->setVisible(offer_.available()); notes_->setEnabled(!working);
     cancel_->setVisible(working && !stopping_); progress_->setVisible(working && !stopping_);
@@ -81,6 +93,7 @@ void UpdatePanel::fetch(const QUrl &url, qint64 limit, std::function<void(QByteA
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setTransferTimeout(30000);
     auto *reply = transport_->get(request); reply_ = reply;
+    reply->setReadBufferSize(qMin<qint64>(limit + 1, 64 * 1024));
     auto data = std::make_shared<QByteArray>(); auto exceeded = std::make_shared<bool>(false);
     auto *deadline = new QTimer(reply); deadline->setSingleShot(true);
     // Metadata stays bounded in time. Binary transfers can take longer on slow
@@ -119,7 +132,7 @@ void UpdatePanel::check(bool manual) {
     if (working_ || preview_) { if (preview_) state("Design preview · update checks are disabled."); return; }
     if (QSysInfo::buildCpuArchitecture() != "x86_64") { state("Use the release page for this architecture."); return; }
     if (!downloaded_.isEmpty()) {
-        if (manual) state("Version " + offer_.version + " is verified and ready to install.");
+        if (manual) state(verifiedUpdateMessage(offer_.version));
         return;
     }
     auto &settings = *settings_;
@@ -143,7 +156,7 @@ void UpdatePanel::check(bool manual) {
             if (!error.isEmpty()) { state(error); return; }
             settings_->setValue("updates/lastCheck", QDateTime::currentSecsSinceEpoch());
             offer_ = offer; state("Version " + offer.version + " is available.");
-            if (notify) notify("LG Input Switch " + offer.version + " is available. Open Preferences → Application updates.");
+            if (notify) notify("LG Input Switch " + offer.version + " is available. Open Settings → Application updates.");
             Q_UNUSED(manual);
         });
     });
@@ -161,14 +174,11 @@ void UpdatePanel::download() {
         const auto path = cache_->filePath(offer.name); QSaveFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) { state("Could not save the downloaded update."); return; }
         QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-        downloaded_ = path; state("Version " + offer.version + " is verified and ready to install.");
-        if (notify) notify("Update downloaded. Choose Install and restart in Preferences when ready.");
+        downloaded_ = path;
+        state(verifiedUpdateMessage(offer.version));
+        if (notify) notify(windows ? "Update downloaded. Install it from Settings when ready."
+                                   : "Update downloaded. Save the verified package from Settings.");
     }, 0, true);
-}
-bool UpdatePanel::linuxManaged() const {
-    if (QCoreApplication::applicationFilePath() != "/usr/bin/LGInputSwitchDesktop") return false;
-    QProcess process; process.start("/usr/bin/pacman", {"-Qoq", QCoreApplication::applicationFilePath()});
-    return process.waitForFinished(3000) && process.exitCode() == 0 && process.readAllStandardOutput().trimmed() == "lginputswitch";
 }
 void UpdatePanel::install() {
     if (working_ || downloaded_.isEmpty() || preview_) return;
@@ -181,28 +191,24 @@ void UpdatePanel::install() {
     if (installBusy) installBusy(true);
     if (quitForUpdate) quitForUpdate();
 #else
-    if (!linuxManaged()) { state("Automatic installation requires the native Arch/CachyOS package. Use the release page for your installation."); return; }
-    QProcess inspect; inspect.start("/usr/bin/pacman", {"-Qp", downloaded_});
-    if (!inspect.waitForFinished(5000) || inspect.exitCode() != 0 ||
-        inspect.readAllStandardOutput().trimmed() != ("lginputswitch " + offer_.version + "-1").toUtf8()) {
-        state("The downloaded package name or version did not match this release."); return;
+    const auto destination = QFileDialog::getSaveFileName(
+        this, "Save verified update package",
+        QDir(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)).filePath(offer_.name),
+        "Arch Linux packages (*.pkg.tar.zst)");
+    if (destination.isEmpty()) return;
+    // Export the exact bytes checked here. Installation is handled by the
+    // user's package manager, outside the app's privilege boundary.
+    QFile source(downloaded_);
+    if (!source.open(QIODevice::ReadOnly)) { state("Could not open the downloaded update."); return; }
+    const auto bytes = source.read(offer_.size + 1);
+    if (bytes.size() != offer_.size ||
+        QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) != offer_.sha256) {
+        downloaded_.clear(); state("The cached update failed verification. Download it again."); return;
     }
-    if (prepareInstall && !prepareInstall()) return;
-    auto *process = new QProcess(this); stopping_ = true;
-    if (installBusy) installBusy(true);
-    state("Approve the system authorization prompt to install this package…", true);
-    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError) {
-        stopping_ = false; if (installBusy) installBusy(false);
-        state("Could not start the package manager. Nothing was installed."); process->deleteLater();
-    });
-    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this, [this, process](int code, QProcess::ExitStatus status) {
-        process->deleteLater(); stopping_ = false; if (installBusy) installBusy(false);
-        if (status != QProcess::NormalExit || code != 0) { state("Package installation failed or was cancelled. Check system dependencies and try again."); return; }
-        auto &settings = *settings_; settings.setValue("updates/result", "Updated to " + offer_.version + "."); settings.sync();
-        if (QProcess::startDetached(QCoreApplication::applicationFilePath(), {"--restart-after", QString::number(QCoreApplication::applicationPid())})) {
-            if (quitForUpdate) quitForUpdate();
-        } else state("Update installed. Please restart LG Input Switch from your application menu.");
-    });
-    process->start("/usr/bin/pkexec", {"--disable-internal-agent", "/usr/bin/pacman", "-U", "--noconfirm", downloaded_});
+    QSaveFile file(destination);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        state("Could not save the update package."); return;
+    }
+    state("Verified package saved. Install it with your system package manager.");
 #endif
 }

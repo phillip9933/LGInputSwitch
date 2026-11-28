@@ -1,26 +1,9 @@
 # Release publication
 
-The project uses numeric versions and full releases, as requested by the maintainer.
-The current version is 1.3.4; see [release notes](releases/1.3.4.md),
-[Windows setup](windows-release.md) and [Linux setup](linux-install.md).
+Stable releases use numeric tags. A public beta uses a tag such as `2.0.0-beta.1` and GitHub’s pre-release flag. The beta leaves the stable Latest release in place.
 
-The Publish full release workflow checks that the selected numeric version matches
-the source, runs all Windows/Linux build and packaging jobs, verifies provenance
-and SHA256 hashes, uploads only the platform binaries and checksums as a draft,
-checks the uploaded hashes and then publishes it as the latest full release. It
-will not overwrite an existing numeric release. Physical hardware limitations are
-recorded in release notes; they are not represented as verified by CI.
+The **Publish release** workflow verifies the selected version against the source and release notes. It builds and tests both platforms, checks the artifact revisions and hashes, and verifies the uploaded draft before publication. An existing public release cannot be overwritten.
 
-The public uploaded assets are exactly the portable Windows EXE, native Linux
-package and SHA256SUMS. GitHub automatically supplies application-source archives
-from the numeric tag. Windows notices and source/rebuild links are embedded in
-the EXE and available through --licenses. Exact Qt source remains available at
-the pinned official URL linked beside the binary in release notes. Debug symbols,
-Arch recipes/source/provenance and build metadata remain internal CI artifacts.
-Published older releases retain their original assets.
+The uploaded assets are the portable Windows x64 executable, the Arch/CachyOS x86_64 package and SHA256SUMS. GitHub supplies the source archives. Arch represents the beta tag as `2.0.0beta1` so the package manager orders it before the final `2.0.0`. The Windows executable embeds its notices and rebuild information.
 
-The previous Linux beta was an earlier publication and is superseded by 1.3.4.
-Future builds do not use alpha/beta/RC version suffixes or prerelease labels.
-
-Dedicated Intel/NVIDIA raw-I²C backends and macOS remain roadmap work; Windows reports #4/#5 remain
-unconfirmed. No new GPU/monitor support is inferred from a successful CI run.
+See the [beta notes](releases/2.0.0-beta.1.md), [Windows setup](windows-release.md) and [Linux setup](linux-install.md).

@@ -39,6 +39,7 @@ QVector<DesktopInput> StableInputs(const SavedMonitor &monitor, const QVector<De
         if (const auto *old = ByValue(monitor.inputs, value))
         {
             input.id = old->id;
+            input.enabled = old->enabled;
             // Preserve custom names, but improve generic vendor/numeric labels.
             if (!old->label.startsWith("Input 0x") && !old->label.isEmpty())
                 input.label = old->label;
@@ -303,7 +304,9 @@ bool ApplyMonitorInputs(DesktopWorkspace &w, const QString &id, const MonitorInp
             for (const auto &action : profile.actions)
                 if (action.inputs.value(id) == input.id)
                     exists = true;
-            if (!exists && profile.actions.size() < 64)
+            const bool newlyDetected = std::none_of(oldInputs.cbegin(), oldInputs.cend(),
+                [&](const DesktopInput &old) { return old.id == input.id; });
+            if (!exists && newlyDetected && profile.actions.size() < 64)
             {
                 QString name = input.label;
                 auto used = [&](const QString &label) {

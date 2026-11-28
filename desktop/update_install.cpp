@@ -28,7 +28,19 @@ void RememberCleanup(const QString &prefix) {
     settings.sync();
 }
 }
+bool WindowsUpdateAllowed() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return false;
+    TOKEN_ELEVATION elevation{};
+    DWORD bytes = 0;
+    const bool allowed = GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &bytes)
+                         && bytes == sizeof(elevation) && !elevation.TokenIsElevated;
+    CloseHandle(token);
+    return allowed;
+}
 void CleanupWindowsUpdateFiles() {
+    if (!WindowsUpdateAllowed()) return;
     QSettings settings("LGInputSwitch", "LGInputSwitchDesktop");
     const auto parent = QFileInfo(QCoreApplication::applicationFilePath()).absolutePath();
     QStringList remaining;
@@ -49,13 +61,18 @@ QString WindowsExecutableVersion(const QString &path) {
     if (!GetFileVersionInfoW(reinterpret_cast<LPCWSTR>(path.utf16()), 0, length, data.data())) return {};
     VS_FIXEDFILEINFO *info = nullptr; UINT bytes = 0;
     if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void **>(&info), &bytes) || bytes < sizeof(*info) ||
-        info->dwSignature != 0xfeef04bd || LOWORD(info->dwProductVersionLS) != 0) return {};
-    return QString("%1.%2.%3").arg(HIWORD(info->dwProductVersionMS)).arg(LOWORD(info->dwProductVersionMS)).arg(HIWORD(info->dwProductVersionLS));
+        info->dwSignature != 0xfeef04bd) return {};
+    const auto version = QString("%1.%2.%3").arg(HIWORD(info->dwProductVersionMS)).arg(LOWORD(info->dwProductVersionMS)).arg(HIWORD(info->dwProductVersionLS));
+    const auto serial = LOWORD(info->dwProductVersionLS);
+    if ((info->dwFileFlags & info->dwFileFlagsMask & VS_FF_PRERELEASE) && serial)
+        return version + "-beta." + QString::number(serial);
+    return serial == 0 ? version : QString{};
 }
 bool StartWindowsUpdate(const UpdateOffer &offer, const QString &download, QString &error) {
+    if (!WindowsUpdateAllowed()) { error = WindowsUpdatePrivilegeMessage; return false; }
     if (!VerifyUpdateFile(download, offer.sha256, offer.size, error)) return false;
     if (WindowsExecutableVersion(download) != offer.version ||
-        QVersionNumber::fromString(offer.version) <= QVersionNumber::fromString(WindowsExecutableVersion(QCoreApplication::applicationFilePath()))) {
+        !NewerStableUpdate(offer.version, WindowsExecutableVersion(QCoreApplication::applicationFilePath()))) {
         error = "The executable version is not the announced newer release."; return false;
     }
     const auto target = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
@@ -92,6 +109,7 @@ bool StartWindowsUpdate(const UpdateOffer &offer, const QString &download, QStri
     return false;
 }
 int ApplyWindowsUpdate(const QString &planPath) {
+    if (!WindowsUpdateAllowed()) return 2;
     const auto helper = QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath();
     const auto parent = QFileInfo(helper).absolutePath();
     const auto base = QFileInfo(helper).fileName();

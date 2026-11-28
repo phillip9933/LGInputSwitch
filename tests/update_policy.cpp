@@ -50,6 +50,9 @@ int main(int argc, char **argv) {
     check(AllowedUpdateUrl(QUrl("https://release-assets.githubusercontent.com/download?token=fixture")), "Valid GitHub redirect rejected");
     check(!ValidUpdateVersion("1.02.3") && !ValidUpdateVersion("65536.0.0") && !ValidUpdateVersion("1.3.3-beta"), "Invalid numeric version accepted");
     check(AutomaticUpdateDue(true, 1, 86401) && !AutomaticUpdateDue(false, 0, 86401) && !AutomaticUpdateDue(true, 100, 50), "Daily throttle is incorrect");
+    check(NewerStableUpdate("2.0.0", "2.0.0-beta.1") && !NewerStableUpdate("1.3.4", "2.0.0-beta.1") &&
+          !NewerStableUpdate("2.0.0-beta.1", "1.3.4") && !NewerStableUpdate("2.0.0", "2.0.0") &&
+          !NewerStableUpdate("2.0.0", "2.0.0-beta.0"), "Stable/beta upgrade ordering is incorrect");
     QTemporaryDir dir; const auto path = dir.filePath("download.exe"); QFile file(path); check(file.open(QIODevice::WriteOnly), "Fixture unavailable"); file.write("executable"); file.close();
     check(VerifyUpdateFile(path, hash, 10, error), "Verified file rejected");
     check(!VerifyUpdateFile(path, hash, 9, error), "Wrong-size file accepted");

@@ -7,6 +7,7 @@ struct UpdateOffer {
     bool available() const { return !version.isEmpty(); }
 };
 QString UpdateAssetName(const QString &version, bool windows);
+bool NewerStableUpdate(const QString &candidate, const QString &installed);
 bool ValidUpdateVersion(const QString &version);
 bool AllowedUpdateUrl(const QUrl &url);
 UpdateOffer SelectUpdate(const QByteArray &json, const QString &installed, bool windows, QString &error);
